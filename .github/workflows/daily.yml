@@ -1,0 +1,79 @@
+name: daily-risk
+
+on:
+  schedule:
+    # 미국 장 마감 + 데이터 확정 후: 화~토 08:17 KST (= 월~금 23:17 UTC)
+    - cron: "17 23 * * 1-5"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -r requirements.txt
+
+      - name: Self-test (수식 검증)
+        run: python -m pytest -q tests
+
+      - name: Check secrets
+        env:
+          PORTFOLIO_YAML: ${{ secrets.PORTFOLIO_YAML }}
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+        run: |
+          if [ -z "$PORTFOLIO_YAML" ]; then echo "::error::Secret PORTFOLIO_YAML 이 없습니다."; exit 1; fi
+          if [ -z "$DASHBOARD_PASSWORD" ]; then echo "::error::Secret DASHBOARD_PASSWORD 가 없습니다. 암호 없이 공개 배포하지 않습니다."; exit 1; fi
+
+      - name: Compute risk
+        env:
+          PORTFOLIO_YAML: ${{ secrets.PORTFOLIO_YAML }}
+          TIINGO_API_KEY: ${{ secrets.TIINGO_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NOTIFY_ONLY_ALERTS: ${{ vars.NOTIFY_ONLY_ALERTS }}
+          DASHBOARD_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+        run: python run.py --notify --out site/index.html
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Encrypt dashboard (비밀번호 보호)
+        env:
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+        run: |
+          npx --yes staticrypt@3 site/index.html -p "$DASHBOARD_PASSWORD" -d site --short --remember 30 \
+            --template-title "Portfolio Risk Monitor" --template-instructions "비밀번호를 입력하세요" \
+            --template-button "열기" --template-placeholder "비밀번호" --template-remember "30일간 기억"
+          grep -q "staticrypt" site/index.html || { echo "::error::암호화 실패"; exit 1; }
+          touch site/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

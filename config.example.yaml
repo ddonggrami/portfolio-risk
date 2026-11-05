@@ -1,0 +1,110 @@
+# ─────────────────────────────────────────────────────────────
+# 포트폴리오 리스크 대시보드 설정
+# 실제 값은 이 파일이 아니라 GitHub Secret "PORTFOLIO_YAML" 에 넣으세요.
+# (공개 저장소라서 이 파일 내용은 누구나 볼 수 있습니다)
+# ─────────────────────────────────────────────────────────────
+
+base_currency: KRW          # VaR·손익을 원화로 계산 (환율 위험 포함). USD로 바꾸면 달러 기준
+nav: 100000000              # 총자산 (base_currency 단위)
+
+# 보유내역 — 두 가지 방법 중 하나
+#  (1) weights 방식: as_of 날짜 기준 비중. 그날 종가로 보유 주수를 역산해서
+#      이후 가격 변화에 따른 비중 이탈(drift)을 자동 추적합니다.
+#  (2) shares 방식: 매매할 때마다 보유 주수를 직접 갱신. 가장 정확합니다.
+holdings_mode: weights
+as_of: 2026-11-05
+holdings:
+  MU:    0.30
+  SGOV:  0.20
+  SPMO:  0.20
+  GLD:   0.15
+  SOXX:  0.10
+  BRK-B: 0.05
+# shares 방식 예시:
+# holdings_mode: shares
+# holdings: {MU: 210, SGOV: 200, SPMO: 180, GLD: 40, SOXX: 30, BRK-B: 10}
+# cash: 0                    # 현금(원화)
+
+# 목표비중 (리밸런싱 기준). 비워두면 holdings(weights)를 목표로 사용
+targets: {}
+
+# ── 위험한도 ──────────────────────────────────────────────────
+risk_limit:
+  amount: 20000000          # 1년 동안 이 금액 이상 잃고 싶지 않음
+  horizon_days: 252         # 1년
+  confidence: 0.95          # 한도 판정에 쓰는 신뢰수준
+  warn_at: 0.80             # 사용률 80% 넘으면 주의
+drawdown_alert: 0.20        # 고점 대비 -20% 넘으면 경고
+
+# ── 리밸런싱 규칙 ─────────────────────────────────────────────
+rebalance:
+  abs_band: 0.05            # 목표 ±5%p
+  rel_band: 0.25            # 또는 목표의 ±25% — 둘 중 더 좁은 쪽 적용 (5/25 rule)
+  calendar: quarterly       # quarterly | monthly | none
+  risk_target_util: 0.90    # VaR 한도 초과 시 사용률 90%로 낮추는 매매안 제시
+  safe_asset: SGOV          # 위험 축소 시 옮겨갈 자산
+
+# ── 비교 지수 (리스크-수익 산점도) ─────────────────────────────
+benchmark: SPY
+compare: [SPY, QQQ, IWM, EFA, EEM, AGG, TLT, GLD, VT]
+blend_60_40: [SPY, AGG]     # 60/40 포트폴리오도 점으로 표시
+
+# ── 상관계수 모니터링 페어 ───────────────────────────────────
+watch_pairs:
+  - [SPY, TLT]              # 주식-채권
+  - [SOXX, IGV]             # 반도체-소프트웨어
+  - [SPY, GLD]
+  - [SOXX, SPY]
+  - [MU, SOXX]
+
+# ── 분산투자 후보 ETF 유니버스 ───────────────────────────────
+candidates:
+  IGV: 소프트웨어
+  XLV: 헬스케어
+  XLU: 유틸리티
+  XLP: 필수소비재
+  XLE: 에너지
+  XLF: 금융
+  XLI: 산업재
+  ITA: 방산·항공
+  USMV: 최소변동성
+  QUAL: 퀄리티
+  VLUE: 가치
+  SCHD: 배당성장
+  RSP: S&P500 동일가중
+  IWM: 미국 소형주
+  EFA: 선진국(미국 제외)
+  EWJ: 일본
+  INDA: 인도
+  EEM: 신흥국
+  VNQ: 리츠
+  TLT: 미국채 20년+
+  IEF: 미국채 7-10년
+  TIP: 물가연동채
+  LQD: 투자등급 회사채
+  HYG: 하이일드
+  EMB: 신흥국 달러채
+  SLV: 은
+  CPER: 구리
+  DBC: 원자재 종합
+  DBMF: 매니지드 퓨처스
+  KMLM: 매니지드 퓨처스(KFA)
+  CAOS: 테일헤지
+  UUP: 달러 인덱스
+  FXY: 엔화
+  IBIT: 비트코인
+  PAVE: 미국 인프라
+  URA: 우라늄
+
+# ── 계산 파라미터 (기관 관행 기반 기본값) ─────────────────────
+params:
+  var_window: 250           # 역사적 시뮬레이션 창 (Basel 관행)
+  ewma_lambda: 0.94         # RiskMetrics
+  boot_years: 10            # 1년 VaR 블록 부트스트랩에 쓰는 과거 기간
+  boot_block: 21            # 블록 길이(1개월) — 변동성 군집 보존
+  boot_paths: 10000
+  corr_windows: [63, 126, 252]
+  corr_regime_gap: 0.30     # 63일 vs 252일 상관이 이만큼 벌어지면 레짐 변화 경고
+  winsor_pct: 0.01          # 상관·추천 계산에만 적용 (VaR엔 미적용)
+  perf_periods: [1, 3, 5]   # 년
+  history_start: 2006-01-01

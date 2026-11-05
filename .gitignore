@@ -1,0 +1,6 @@
+config.yaml
+site/
+.cache/
+__pycache__/
+*.pyc
+.staticrypt.json
