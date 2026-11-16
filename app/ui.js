@@ -45,7 +45,13 @@ function layout(extra) {
     xaxis: Object.assign({}, ax), yaxis: Object.assign({}, ax), legend: { orientation: "h", y: -0.22, font: { color: css("--ink2") } }, hovermode: "closest", showlegend: false }, extra || {});
 }
 const AX = (extra) => Object.assign({ gridcolor: css("--grid"), linecolor: css("--axis"), zerolinecolor: css("--axis"), tickfont: { color: css("--muted"), size: 11 }, automargin: true }, extra);
-const plot = (id, data, lay) => { const el = document.getElementById(id); if (el) Plotly.react(el, data, layout(lay), { displayModeBar: false, responsive: true }); };
+// 모바일에서 탭/드래그로 의도치 않게 확대되지 않도록 축을 고정하고, 탭하면 값만 보이게 함
+const plot = (id, data, lay) => {
+  const el = document.getElementById(id); if (!el) return;
+  const L = layout(lay); L.dragmode = false;
+  for (const k of Object.keys(L)) if (/^[xy]axis\d*$/.test(k)) L[k] = Object.assign({}, L[k], { fixedrange: true });
+  Plotly.react(el, data, L, { displayModeBar: false, responsive: true, scrollZoom: false, doubleClick: false });
+};
 const spin = t => `<div class="empty"><span class="spin"></span> ${t || "계산 중…"}</div>`;
 const later = fn => new Promise(r => setTimeout(() => r(fn()), 20));
 
@@ -267,7 +273,7 @@ function recHtml() {
       <div class="row" style="margin-top:8px"><button class="btn" data-fr="${i}">투자선에서 보기</button></div></div>`;
   }).join("") + `<p class="note">수익 쪽 신호(상대강도·마진)는 검증상 예측력이 거의 없어 추천 근거에서 제외했습니다.</p>`;
 }
-function bindRec() { document.querySelectorAll("[data-fr]").forEach(b => b.onclick = () => { S.overlay = +b.dataset.fr; S.frIdx = null; go("fr"); }); }
+function bindRec() { document.querySelectorAll("[data-fr]").forEach(b => b.onclick = () => { S.overlay = +b.dataset.fr; S.frIdx = null; S.frZoom = true; go("fr"); }); }
 function bindHoldings() {
   const sync = () => { S.holdings = readHoldings(); };
   const ar = $("#addRow"); if (!ar) return;
@@ -362,22 +368,26 @@ function renderMg() {
 }
 
 // ═════════ 투자선 ═════════
-function frSet() {
+function frAll() {
   const base = new Set();
   if (S.port && !S.port.empty) Object.keys(S.port.W.w).forEach(t => base.add(t === E.CASH ? "SGOV" : t));
   else (S.market.defaults.frontier || []).forEach(t => base.add(t));
-  if (!S.set.fr.noSGOV) base.add("SGOV");
+  base.add("SGOV");
   if (S.rec && S.overlay !== null) S.rec.actions.forEach(a => base.add(a.to));
   S.set.fr.extra.forEach(t => base.add(t));
   return [...base].filter(t => S.ctx.R[t]);
 }
+const frOff = () => S.set.fr.off || (S.set.fr.off = []);
+function frSet() { return frAll().filter(t => !frOff().includes(t)); }
 function renderFr() {
   const el = $("#v-fr"); if (!S.ctx) { el.innerHTML = spin(); return; }
-  const f = S.set.fr, tk = frSet(), locked = S.port && !S.port.empty ? Object.keys(S.port.W.w).map(t => t === E.CASH ? "SGOV" : t) : [];
+  const f = S.set.fr, all = frAll(), tk = frSet(), held = S.port && !S.port.empty ? Object.keys(S.port.W.w).map(t => t === E.CASH ? "SGOV" : t) : [];
+  const heldOff = held.filter(t => frOff().includes(t));
   const opts = E.tickers(S.ctx).sort().map(t => `<option value="${t}">${esc(S.market.names[t] || "")}</option>`).join("");
   el.innerHTML = `<div class="card"><h2>효율적 투자선</h2>
-    <p class="desc">자산 (보유 종목은 고정, 나머지는 눌러서 제거)</p>
-    <div class="chips">${tk.map(t => `<span class="chip on" data-k="${t}">${t}${locked.includes(t) ? "" : " <i>×</i>"}</span>`).join("")}</div>
+    <p class="desc">자산을 눌러 넣고 빼세요 (파란색 = 포함). 직접 추가한 자산은 길게 누르면 목록에서 삭제됩니다.</p>
+    <div class="chips">${all.map(t => `<button class="chip ${tk.includes(t) ? "on" : ""}" data-k="${t}" aria-pressed="${tk.includes(t)}">${tk.includes(t) ? "✓ " : ""}${t}${held.includes(t) ? " <i>보유</i>" : ""}</button>`).join("")}</div>
+    ${heldOff.length ? `<div class="banner">보유 중인 ${heldOff.join(", ")}를 뺐기 때문에 '현재 포트' 위치와 추천 화살표는 표시하지 않습니다.</div>` : ""}
     <div class="row"><input list="tk2" id="frAdd" placeholder="자산 추가 (예: XLV)" autocapitalize="characters" style="flex:1"><button class="btn" id="frAddB">추가</button><datalist id="tk2">${opts}</datalist></div>
     <div style="margin-top:10px">
       <div class="seg" id="frM">${E.METHODS.map(([k, l]) => `<button data-k="${k}" class="${k === f.method ? "on" : ""}">${l}</button>`).join("")}</div>
@@ -392,8 +402,21 @@ function renderFr() {
     <div id="frW8"></div></div>
     <div class="card"><h2>변동성별 비중 변화</h2><p class="desc">가로축 = 감당할 변동성, 세로 = 투자선 위 최적 비중. 세로 점선 = 위에서 고른 변동성.</p><div class="chart tall" id="cTr"></div></div>
     <div class="card"><h2>세 가지 기대수익 가정</h2><div id="frMeth"></div></div>`;
-  el.querySelectorAll(".chips .chip").forEach(c => c.onclick = () => { const k = c.dataset.k; if (locked.includes(k)) return; if (k === "SGOV") S.set.fr.noSGOV = true; S.set.fr.extra = S.set.fr.extra.filter(x => x !== k); if (S.rec && S.overlay !== null && S.rec.actions.some(a => a.to === k)) S.overlay = null; saveSet(); renderFr(); });
-  $("#frAddB").onclick = () => { const t = $("#frAdd").value.trim().toUpperCase(); if (t === "SGOV") { S.set.fr.noSGOV = false; saveSet(); renderFr(); return; } if (S.ctx.R[t] && !S.set.fr.extra.includes(t)) { S.set.fr.extra.push(t); saveSet(); renderFr(); } };
+  el.querySelectorAll(".chips .chip").forEach(c => {
+    c.onclick = () => {
+      const k = c.dataset.k, off = frOff();
+      if (off.includes(k)) off.splice(off.indexOf(k), 1);
+      else { if (tk.length <= 2) { $("#frNote").textContent = "자산이 최소 2개는 있어야 투자선을 그릴 수 있습니다."; return; } off.push(k); }
+      S.frIdx = null; saveSet(); renderFr();
+    };
+    let tm; c.addEventListener("touchstart", () => { tm = setTimeout(() => { const k = c.dataset.k; if (S.set.fr.extra.includes(k)) { S.set.fr.extra = S.set.fr.extra.filter(x => x !== k); S.set.fr.off = frOff().filter(x => x !== k); saveSet(); renderFr(); } }, 700); }, { passive: true });
+    c.addEventListener("touchend", () => clearTimeout(tm)); c.addEventListener("touchmove", () => clearTimeout(tm));
+  });
+  $("#frAddB").onclick = () => {
+    const t = $("#frAdd").value.trim().toUpperCase().replace(".", "-");
+    if (!S.ctx.R[t]) { $("#frNote").textContent = `${t}: 데이터가 없는 티커입니다.`; return; }
+    S.set.fr.off = frOff().filter(x => x !== t); if (!all.includes(t)) S.set.fr.extra.push(t); S.frIdx = null; saveSet(); renderFr();
+  };
   [["frM", "method", x => x], ["frY", "years", Number], ["frW", "maxW", Number]].forEach(([id, key, cv]) => el.querySelectorAll(`#${id} button`).forEach(b => b.onclick = () => { S.set.fr[key] = cv(b.dataset.k); saveSet(); S.frIdx = null; renderFr(); }));
   later(() => drawFr(tk));
 }
@@ -403,7 +426,7 @@ function drawFr(tk) {
   const ex = E.expected(M, f.method, S.set.erp), fr = E.frontier(ex.mu, ex.S, { maxW: f.maxW, rf: ex.rf }), P = fr.pts;
   $("#frNote").textContent = `월간 수익률 ${M.rows.length}개월(${M.labels[0]}~${M.labels[M.labels.length - 1]}), 달러 기준 · 공분산 Ledoit-Wolf 축소 ${num(ex.shrink)} · 무위험 ${pct(ex.rf, 2)}` +
     (f.method === "shrink" ? ` · 평균을 ${pct(ex.phi, 0)} 축소` : f.method === "capm" ? ` · 위험프리미엄 ${pct(S.set.erp, 1)} × 베타` : " · 과거 평균 그대로(최근 많이 오른 자산에 쏠림)");
-  const hasP = S.port && !S.port.empty;
+  const hasP = S.port && !S.port.empty && !Object.keys(S.port.W.w).some(t => frOff().includes(t === E.CASH ? "SGOV" : t));
   const map = w => { const o = {}; for (const k in w) { const t = k === E.CASH ? "SGOV" : k; o[t] = (o[t] || 0) + w[k]; } return o; };
   const cur = hasP ? E.point(ex, tk, map(S.port.W.w)) : null;
   if (S.frIdx === null) { const v0 = cur ? cur.vol : fr.maxSharpe.vol; let bi = 0; P.forEach((p, i) => { if (Math.abs(p.vol - v0) < Math.abs(P[bi].vol - v0)) bi = i; }); S.frIdx = bi; }
@@ -416,7 +439,7 @@ function drawFr(tk) {
   const ann = [];
   if (cur) traces.push({ x: [cur.vol], y: [cur.ret], mode: "markers", name: "현재 포트", marker: { symbol: "star", size: 16, color: css("--s8"), line: { color: css("--card"), width: 1.5 } }, hovertemplate: "현재 포트<br>변동성 %{x:.1%}<br>기대수익 %{y:.1%}<extra></extra>" });
   if (cur && S.rec && S.overlay !== null) {
-    S.rec.actions.forEach((a, i) => {
+    S.rec.actions.filter(a => Object.keys(a.w1).every(t => tk.includes(t === E.CASH ? "SGOV" : t))).forEach((a, i) => {
       const p = E.point(ex, tk, map(a.w1)), on = i === S.overlay;
       traces.push({ x: [p.vol], y: [p.ret], mode: "markers+text", text: [String(i + 1)], textposition: "middle right", textfont: { size: 11, color: css("--ink") }, name: a.title, marker: { size: on ? 12 : 9, color: on ? css("--s2") : css("--s4"), line: { color: css("--card"), width: 1.5 } }, hovertemplate: `${esc(a.title)}<br>변동성 %{x:.1%}<br>기대수익 %{y:.1%}<extra></extra>` });
       ann.push({ x: p.vol, y: p.ret, ax: cur.vol, ay: cur.ret, xref: "x", yref: "y", axref: "x", ayref: "y", showarrow: true, arrowhead: 2, arrowsize: 1, arrowwidth: on ? 2 : 1, arrowcolor: on ? css("--s2") : css("--axis"), text: "" });
@@ -425,13 +448,15 @@ function drawFr(tk) {
   const sel = P[S.frIdx];
   const vline = x => ({ type: "line", x0: x, x1: x, yref: "paper", y0: 0, y1: 1, line: { color: css("--muted"), width: 1, dash: "dot" } });
   let xr, yr;
-  if (cur && S.rec && S.overlay !== null && S.frZoom !== false) {
-    const pts = [cur, ...S.rec.actions.map(a => E.point(ex, tk, map(a.w1)))], vs = pts.map(p => p.vol), rs = pts.map(p => p.ret);
+  const showActs = cur && S.rec && S.overlay !== null;
+  if (S.frZoom === undefined) S.frZoom = !!showActs;
+  if (cur && S.frZoom) {
+    const pts = [cur, ...(showActs ? S.rec.actions.filter(a => Object.keys(a.w1).every(t => tk.includes(t === E.CASH ? "SGOV" : t))).map(a => E.point(ex, tk, map(a.w1))) : [])], vs = pts.map(p => p.vol), rs = pts.map(p => p.ret);
     const dx = Math.max(0.03, (Math.max(...vs) - Math.min(...vs)) * 0.6), dy = Math.max(0.015, (Math.max(...rs) - Math.min(...rs)) * 0.6);
     xr = [Math.min(...vs) - dx, Math.max(...vs) + dx]; yr = [Math.min(...rs) - dy, Math.max(...rs) + dy];
   }
   plot("cFr", traces, { xaxis: AX({ tickformat: xr ? ".1%" : ".0%", title: { text: "연 변동성", font: { size: 11 } }, rangemode: xr ? undefined : "tozero", range: xr }), yaxis: AX({ tickformat: yr ? ".1%" : ".0%", title: { text: "기대수익(연)", font: { size: 11 } }, range: yr }), annotations: ann, shapes: [vline(sel.vol)] });
-  const zb = $("#frZoom"); if (zb) { zb.hidden = !(cur && S.rec && S.overlay !== null); zb.textContent = S.frZoom === false ? "변경안 확대" : "전체 보기"; zb.onclick = () => { S.frZoom = S.frZoom === false; drawFr(tk); }; }
+  const zb = $("#frZoom"); if (zb) { zb.hidden = !cur; zb.textContent = S.frZoom ? "전체 보기" : (showActs ? "변경안 주변 확대" : "현재 포트 주변 확대"); zb.onclick = () => { S.frZoom = !S.frZoom; drawFr(tk); }; }
   $("#frLeg").innerHTML = `<span><i style="background:var(--s1)"></i>투자선</span><span><i style="background:var(--s3)"></i>최대 샤프</span>${cur ? '<span><i style="background:var(--s8)"></i>현재 포트(★)</span>' : ""}${S.overlay !== null && S.rec ? '<span><i style="background:var(--s2)"></i>추천 변경안(번호)</span>' : ""}<span><i style="background:var(--axis)"></i>개별 자산</span>`;
   // 비중 변화 (8개 넘으면 평균 비중 작은 것부터 '기타'로)
   const avg = tk.map((t, j) => [t, j, P.reduce((s, p) => s + p.w[j], 0)]).sort((a, b) => b[2] - a[2]);
