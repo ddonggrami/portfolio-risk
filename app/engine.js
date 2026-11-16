@@ -569,33 +569,33 @@
   E.alerts = function (ctx, w, nav, diag, set) {
     set = Object.assign({ limit: { amount: 2e7, warn: 0.8 }, dupTh: 0.9, ddWarn: [0.10, 0.20], moveTh: 0.03, targets: null, band: [0.05, 0.25] }, set || {});
     const mk = ctx.market, A = [];
-    const add = (key, level, label, text, dist) => A.push({ key, level, label, text, dist });
+    const add = (key, level, label, text, dist, short) => A.push({ key, level, label, text, dist, short: short || label });
     if (diag) {
       const u = diag.util;
       add("util:" + (u > 1 ? "over" : u > set.limit.warn ? "warn" : "ok"), u > 1 ? "critical" : u > set.limit.warn ? "warning" : "ok",
-        "위험한도", `1년 95% VaR 사용률 ${pct(u, 0)}`, u > 1 ? "한도 초과 중" : `한도까지 ${pct(1 - u, 0)}p 여유`);
+        "위험한도", `1년 95% VaR 사용률 ${pct(u, 0)}`, u > 1 ? "한도 초과 중" : `한도까지 ${pct(1 - u, 0)}p 여유`, `위험한도 ${pct(u, 0)}`);
       const pr = E.basketSeries(ctx, w, "KRW"), today = pr[ctx.n - 1];
       if (Number.isFinite(today)) add("move:" + (today <= -set.moveTh ? ctx.dates[ctx.n - 1] : "ok"), today <= -set.moveTh ? "warning" : "ok",
-        "하루 변동", `${mk.meta.provisional ? "오늘(장중)" : ctx.dates[ctx.n - 1]} 포트폴리오 ${pct(today, 1)}`, `급락 기준 ${pct(-set.moveTh, 0)}까지 ${pp(today + set.moveTh)}`);
+        "하루 변동", `${mk.meta.provisional ? "오늘(장중)" : ctx.dates[ctx.n - 1]} 포트폴리오 ${pct(today, 1)}`, `급락 기준 ${pct(-set.moveTh, 0)}까지 ${pp(today + set.moveTh)}`, `하루 ${pct(today, 1)}`);
       const dd = E.drawdown(ctx, w, 756).now, band = dd <= -set.ddWarn[1] ? 2 : dd <= -set.ddWarn[0] ? 1 : 0;
-      add("dd:" + band, band === 2 ? "critical" : band ? "warning" : "ok", "고점 대비 낙폭", `${pct(dd, 1)} (현재 비중, 3년 기준)`, band ? "경고 구간" : `경고(-${pct(set.ddWarn[0], 0)})까지 ${pp(dd + set.ddWarn[0])}`);
+      add("dd:" + band, band === 2 ? "critical" : band ? "warning" : "ok", "고점 대비 낙폭", `${pct(dd, 1)} (현재 비중, 3년 기준)`, band ? "경고 구간" : `경고(-${pct(set.ddWarn[0], 0)})까지 ${pp(dd + set.ddWarn[0])}`, `낙폭 ${pct(dd, 0)}`);
       for (const d of diag.D.slice(0, 3)) add(`dup:${d.a}-${d.b}:${d.flag ? 1 : 0}`, d.flag ? "warning" : "ok", "중복 노출",
-        `${d.a}–${d.b} 6개월 상관 ${d.c126.toFixed(2)}`, d.flag ? `기준(${set.dupTh}) 초과` : `기준까지 ${(set.dupTh - d.c126).toFixed(2)}`);
+        `${d.a}–${d.b} 6개월 상관 ${d.c126.toFixed(2)}`, d.flag ? `기준(${set.dupTh}) 초과` : `기준까지 ${(set.dupTh - d.c126).toFixed(2)}`, `중복 ${d.a}·${d.b} ${d.c126.toFixed(2)}`);
       const rule = set.rule || { mode: "band", abs: set.band[0], rel: set.band[1], freq: "Q" };
       if (set.targets && rule.mode !== "none") {
         const cal = E.calendarDue(ctx, rule);
-        if (cal) add(`cal:${cal.due ? cal.last : "no"}`, cal.due ? "info" : "ok", "정기 리밸런싱", cal.due ? `${E.FREQ[rule.freq]} 점검 시기 (기준일 ${cal.last})` : `최근 기준일 ${cal.last || "–"}`, cal.due ? "이번 주 점검" : "다음 기간 말에 점검");
+        if (cal) add(`cal:${cal.due ? cal.last : "no"}`, cal.due ? "info" : "ok", "정기 리밸런싱", cal.due ? `${E.FREQ[rule.freq]} 점검 시기 (기준일 ${cal.last})` : `최근 기준일 ${cal.last || "–"}`, cal.due ? "이번 주 점검" : "다음 기간 말에 점검", "정기 리밸런싱 시기");
         const BD = E.bands(set.targets, rule);
         for (const t of Object.keys(set.targets)) {
           const tg = set.targets[t], cur = w[t] || 0, bd = BD[t], dv = cur - tg;
           add(`band:${t}:${Math.abs(dv) > bd ? 1 : 0}`, Math.abs(dv) > bd ? "warning" : "ok", "리밸런싱",
-            `${t} ${pct(cur, 1)} (목표 ${pct(tg, 0)} ±${pct(bd, 1)})`, Math.abs(dv) > bd ? `${dv > 0 ? "매도" : "매수"} ${fmtW(Math.abs(dv) * nav)}` : `허용범위까지 ${pp(bd - Math.abs(dv))}`);
+            `${t} ${pct(cur, 1)} (목표 ${pct(tg, 0)} ±${pct(bd, 1)})`, Math.abs(dv) > bd ? `${dv > 0 ? "매도" : "매수"} ${fmtW(Math.abs(dv) * nav)}` : `허용범위까지 ${pp(bd - Math.abs(dv))}`, `${t} ${dv > 0 ? "매도" : "매수"} ${fmtW(Math.abs(dv) * nav)}`);
         }
       }
       for (const t of Object.keys(w)) {
         const r = mk.rs[t]; if (!r) continue;
         add(`rs:${t}:${r.state}`, r.state === "약세" ? "info" : "ok", "상대강도(참고)", `${t} ${r.state} (${r.since}~)`,
-          `추세선 대비 ${pct(r.gap, 1)}${r.gap > 0 ? " 위" : " 아래"}`);
+          `추세선 대비 ${pct(r.gap, 1)}${r.gap > 0 ? " 위" : " 아래"}`, `${t} ${r.state}(참고)`);
       }
     }
     return A;

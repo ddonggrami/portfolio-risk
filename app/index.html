@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1c5cab">
 <title>Portfolio Risk Monitor</title>
+<script>
+// 카톡 '앱에서 보기'로 열면 카톡 내부 브라우저라 보유내역(크롬에 저장)이 안 보이므로 외부 브라우저로 다시 엶
+if (/KAKAOTALK/i.test(navigator.userAgent)) location.href = "kakaotalk://web/openExternal?url=" + encodeURIComponent(location.href);
+</script>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">

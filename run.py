@@ -22,6 +22,13 @@ def copy_app(out: Path) -> None:
             dst = out / p.relative_to(ROOT / "app")
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(p, dst)
+    import hashlib
+    h = hashlib.sha256()
+    for f in sorted((ROOT / "app").rglob("*")):
+        if f.is_file() and f.name != "sw.js":
+            h.update(f.read_bytes())
+    sw = out / "sw.js"
+    sw.write_text(sw.read_text(encoding="utf-8").replace('const V = "pr-v1";', f'const V = "pr-{h.hexdigest()[:10]}";'), encoding="utf-8")
     (out / ".nojekyll").touch()
 
 

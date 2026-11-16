@@ -104,6 +104,7 @@ async function loadData() {
     S.returns = await getJSON("returns.json");
     LS.set("returns_date", S.market.meta.price_date);
     S.ctx = E.load(S.market, S.returns);
+    try { S.status = await getJSON("status.json"); } catch (e) { S.status = null; }
     if (S.set.erp === null) S.set.erp = S.market.defaults.erp;
     S.loadError = null;
   } catch (e) { S.loadError = String(e); }
@@ -154,6 +155,15 @@ function renderHdr() {
   $("#hdr").innerHTML = `<span class="dot" style="background:var(${col})"></span>${h.txt} · 점검 ${m.generated} · 시세 ${m.price_date}${m.provisional ? " (장중 잠정)" : " 종가"}${m.demo ? " · 데모" : ""}`;
 }
 
+function notifyLine() {
+  const st = S.status; if (!st) return "";
+  const k = { ok: ["ok", "연결됨"], configured: ["ok", "설정됨"], expired: ["critical", "인증 만료 — 다시 연결 필요"], send_failed: ["warning", "전송 실패"], error: ["warning", "연결 오류"], off: ["mute", "꺼짐"] }[st.kakao] || ["mute", st.kakao];
+  const sent = st.kakao_sent ? ` · 마지막 전송 ${kst(new Date(st.kakao_sent))}` : "";
+  const warnPf = st.kakao !== "off" && !st.portfolio ? `<div class="note">보유내역이 동기화되지 않아 시장 알림만 갑니다 (설정 → 암호화해서 올리기)</div>` : "";
+  const warnPw = st.kakao !== "off" && !st.password ? `<div class="note">PORTFOLIO_PASSWORD가 없어 카톡 연결을 자동 유지할 수 없습니다</div>` : "";
+  return `<div class="alert" style="margin-top:8px">${badge(k[0], "카톡 알림")}<div class="t">${k[1]}${sent}${st.kakao === "expired" || st.kakao === "off" ? ' <a href="kakao.html">연결하기</a>' : ""}${warnPf}${warnPw}</div></div>`;
+}
+
 // ═════════ 홈 ═════════
 function renderHome() {
   const el = $("#v-home");
@@ -165,7 +175,8 @@ function renderHome() {
       <div class="kpi"><div class="l">다음 자동 점검</div><div class="v">${h.next ? kst(h.next) : "–"}</div><div class="s">미장 중 매시간 · 매일 마감 후</div></div>
     </div>
     <div class="row" style="margin-top:10px"><button class="btn primary" id="runNow">지금 점검</button><span class="note" id="runMsg">${S.token ? "누르면 3~5분 뒤 새 결과가 반영됩니다" : "설정에서 GitHub 토큰을 넣으면 쓸 수 있습니다"}</span></div>
-    ${m.failed && m.failed.length ? `<p class="note">가격 수집 실패: ${m.failed.join(", ")}</p>` : ""}</div>`;
+    ${m.failed && m.failed.length ? `<p class="note">가격 수집 실패: ${m.failed.join(", ")}</p>` : ""}
+    ${notifyLine()}</div>`;
   if (S.port && !S.port.empty) {
     const d = S.port.diag, vl = { "양호": "ok", "보통": "warning", "점검 필요": "critical" }[d.verdict];
     html += `<div class="card"><div class="spread"><h2>내 포트폴리오 진단</h2>${badge(vl, d.verdict)}</div>
@@ -571,12 +582,14 @@ function renderSet() {
     <div class="row" style="margin-top:6px"><label class="small" style="width:100px">허용범위</label>±<input type="number" step="0.5" id="rbAbs" value="${(S.set.rule.abs * 100).toFixed(1)}" style="width:70px">%p 또는 목표의 ±<input type="number" step="1" id="rbRel" value="${(S.set.rule.rel * 100).toFixed(0)}" style="width:64px">%</div>
     <p class="note">상대 %를 0으로 두면 절대 %p만 씁니다. 예: 5 / 25 → 5/25 규칙, 5 / 20 → 5/20 규칙.</p>
     <div class="row" style="margin-top:8px"><button class="btn primary" id="rbSave">저장</button><span class="note" id="rbMsg"></span></div></div>
+  <div class="card"><h2>카톡 알림</h2><p class="desc">카카오톡 '나와의 채팅'으로 짧은 요약과 '앱에서 보기' 버튼이 옵니다. 신호가 생길 때 즉시, 일요일 아침엔 주간 요약.</p>
+    <a class="btn primary" href="kakao.html" style="text-decoration:none;display:inline-block">카톡 알림 연결하기</a></div>
   <div class="card"><h2>GitHub 연결 (지금 점검 · 알림 동기화)</h2>
     <p class="desc">저장소: <b>${ri ? ri.o + "/" + ri.r : "알 수 없음"}</b> <input id="repo" placeholder="아이디/저장소 (자동 인식 안 될 때)" value="${esc(S.set.repo || "")}" style="width:100%;margin-top:4px"></p>
     <p class="desc">세분화 토큰(Fine-grained token): 이 저장소만, 권한 Actions 읽기·쓰기 + Contents 읽기·쓰기. 이 휴대폰에만 저장됩니다.</p>
     <input type="password" id="tok" placeholder="github_pat_..." value="${S.token ? "••••••••" : ""}" style="width:100%">
     <div class="row" style="margin-top:8px"><button class="btn" id="tokSave">토큰 저장</button><button class="btn" id="tokDel">토큰 삭제</button></div>
-    <h3>텔레그램 알림용 보유내역 동기화</h3>
+    <h3>알림용 보유내역 동기화</h3>
     <p class="desc">보유내역을 비밀번호로 암호화(AES-256)해서 저장소에 올립니다. 서버는 GitHub Secret의 PORTFOLIO_PASSWORD로만 풀 수 있으니 같은 비밀번호를 쓰세요.</p>
     <input type="password" id="pw" placeholder="비밀번호 (Secret과 동일)" style="width:100%">
     <div class="row" style="margin-top:8px"><button class="btn primary" id="syncB">암호화해서 올리기</button><span class="note" id="syncMsg"></span></div></div>
