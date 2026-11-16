@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────
-# 포트폴리오 리스크 대시보드 설정
-# 실제 값은 이 파일이 아니라 GitHub Secret "PORTFOLIO_YAML" 에 넣으세요.
-# (공개 저장소라서 이 파일 내용은 누구나 볼 수 있습니다)
+# 시장 분석 설정 (유니버스·신호 기준). 공개 저장소라 누구나 볼 수 있습니다.
+# 실제 보유내역은 여기 적지 말고 앱의 '내 포트'에 입력하세요(휴대폰에만 저장).
+# 아래 holdings 는 데이터 수집 대상 목록에만 쓰입니다.
 # ─────────────────────────────────────────────────────────────
 
 base_currency: KRW          # VaR·손익을 원화로 계산 (환율 위험 포함). USD로 바꾸면 달러 기준
@@ -14,15 +14,13 @@ nav: 100000000              # 총자산 (base_currency 단위)
 holdings_mode: weights
 as_of: 2026-11-05
 holdings:
-  MU:    0.30
-  SGOV:  0.20
-  SPMO:  0.20
-  GLD:   0.15
-  SOXX:  0.10
-  BRK-B: 0.05
+  SPMO:  0.40
+  GLD:   0.30
+  SOXX:  0.20
+  BRK-B: 0.10
 # shares 방식 예시:
 # holdings_mode: shares
-# holdings: {MU: 210, SGOV: 200, SPMO: 180, GLD: 40, SOXX: 30, BRK-B: 10}
+# holdings: {SPMO: 300, GLD: 85, SOXX: 135, BRK-B: 17}
 # cash: 0                    # 현금(원화)
 
 # 목표비중 (리밸런싱 기준). 비워두면 holdings(weights)를 목표로 사용
@@ -55,9 +53,31 @@ watch_pairs:
   - [SOXX, IGV]             # 반도체-소프트웨어
   - [SPY, GLD]
   - [SOXX, SPY]
-  - [MU, SOXX]
+  - [SPMO, SOXX]            # 모멘텀-반도체 중복 노출
 
-# ── 분산투자 후보 ETF 유니버스 ───────────────────────────────
+# ── '달리는 말' 후보 (상승장 견인형 ETF) — 상대강도 신호 대상 ──────
+runners:
+  SOXX: 반도체(iShares)
+  SMH: 반도체(VanEck)
+  SPMO: S&P500 모멘텀
+  MTUM: 미국 모멘텀(MSCI)
+  QQQM: 나스닥100
+  XLK: 기술
+  VGT: 정보기술(Vanguard)
+  IGV: 소프트웨어
+  MGK: 초대형 성장
+  SCHG: 대형 성장
+  XLG: S&P500 상위50
+  XLC: 커뮤니케이션
+  XLY: 경기소비재
+  XLI: 산업재
+  XLF: 금융
+  BRK-B: 버크셔
+  RSP: S&P500 동일가중
+  IWM: 미국 소형주
+# 직접 추가: runners 에 'TICKER: 이름' 한 줄 추가
+
+# ── 짝(분산) 후보 ETF 유니버스 ───────────────────────────────
 candidates:
   IGV: 소프트웨어
   XLV: 헬스케어
@@ -95,6 +115,25 @@ candidates:
   IBIT: 비트코인
   PAVE: 미국 인프라
   URA: 우라늄
+  SGOV: 초단기 국채(현금성)
+  GLD: 금
+  BRK-B: 버크셔
+  SPY: S&P500
+  QQQM: 나스닥100
+  SOXX: 반도체
+  SPMO: S&P500 모멘텀
+
+# ── 효율적 투자선 기본 자산 (앱에서 바꿀 수 있음) ────────────────
+frontier_default: [SPMO, GLD, SOXX, BRK-B, SGOV, XLE]
+frontier_erp: 0.045         # 시장균형(CAPM) 방식의 주식 위험프리미엄 가정
+
+# ── 신호 기준 ─────────────────────────────────────────────────
+signals:
+  rs_sma_days: 210          # 상대강도선 추세 판정 (10개월 이동평균, Faber)
+  pair_low_corr: 0.30       # 이 아래면 '상관 낮음'
+  pair_drop: 0.20           # 3개월 상관이 12개월보다 이만큼 낮으면 '상관 낮아지는 중'
+  dup_corr: 0.90            # 보유 위험자산 간 126일 상관이 이 위면 '중복 노출'
+  margin_gap: 0.05          # 조건부 12개월 기대 vs 전체 차이가 ±5%p 넘으면 '마진 변화'
 
 # ── 계산 파라미터 (기관 관행 기반 기본값) ─────────────────────
 params:

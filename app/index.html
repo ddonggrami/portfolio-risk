@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c5cab">
+<title>Portfolio Risk Monitor</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{
+  color-scheme:light;
+  --page:#f9f9f7; --card:#ffffff; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,.10); --row-alt:#f5f5f2;
+  --nav:#1c5cab; --accent:#2a78d6; --on-accent:#fff;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300; --s7:#6250d6; --s8:#e34948;
+  --good:#0ca30c; --good-ink:#006300; --warn:#fab219; --crit:#d03b3b;
+  --div-neg:#d03b3b; --div-mid:#f0efec; --div-pos:#2a78d6;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  color-scheme:dark; --page:#0d0d0d; --card:#1a1a19; --ink:#f0efec; --ink2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10); --row-alt:#222221; --nav:#104281; --accent:#3987e5;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
+  --good-ink:#0ca30c; --div-mid:#383835; --div-pos:#3987e5; --div-neg:#e66767;}}
+:root[data-theme="dark"]{
+  color-scheme:dark; --page:#0d0d0d; --card:#1a1a19; --ink:#f0efec; --ink2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10); --row-alt:#222221; --nav:#104281; --accent:#3987e5;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
+  --good-ink:#0ca30c; --div-mid:#383835; --div-pos:#3987e5; --div-neg:#e66767;}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--page);color:var(--ink);font:14px/1.5 system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif}
+header{background:var(--nav);color:#fff;padding:calc(10px + env(safe-area-inset-top)) 16px 10px;position:sticky;top:0;z-index:10}
+header h1{margin:0;font-size:16px;font-weight:600}
+header .sub{font-size:12px;opacity:.85;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+main{max-width:980px;margin:0 auto;padding:12px 12px calc(84px + env(safe-area-inset-bottom))}
+nav.bottom{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--grid);display:flex;z-index:10;padding-bottom:env(safe-area-inset-bottom)}
+nav.bottom button{flex:1;border:0;background:none;color:var(--muted);padding:8px 0 9px;font:inherit;font-size:11.5px;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer}
+nav.bottom button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8}
+nav.bottom button.on{color:var(--accent);font-weight:600}
+section.view{display:none} section.view.on{display:block}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px}
+.card h2{font-size:15px;margin:0 0 4px;font-weight:600}
+.card h3{font-size:13.5px;margin:14px 0 6px;font-weight:600}
+.desc{color:var(--ink2);font-size:12.5px;margin:0 0 10px}
+.note{color:var(--muted);font-size:12px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.spread{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.grid2{display:grid;gap:10px;grid-template-columns:1fr 1fr}
+.grid2>*{min-width:0}
+@media(min-width:760px){.g-md-3{grid-template-columns:repeat(3,1fr)}}
+.kpi{background:var(--row-alt);border-radius:8px;padding:10px}
+.kpi .l{color:var(--ink2);font-size:12px}.kpi .v{font-size:19px;font-weight:600}.kpi .s{color:var(--muted);font-size:11.5px}
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:700;border-radius:5px;padding:2px 7px;white-space:nowrap}
+.b-crit{background:var(--crit);color:#fff}.b-warn{background:var(--warn);color:#0b0b0b}.b-good{background:var(--good);color:#fff}.b-info{background:var(--accent);color:#fff}.b-mute{background:var(--row-alt);color:var(--ink2);border:1px solid var(--grid)}
+.pill{display:inline-block;font-size:11.5px;border:1px solid var(--grid);border-radius:999px;padding:1px 8px;color:var(--ink2);white-space:nowrap}
+.tbl{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -14px;padding:0 14px}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th,td{padding:7px 8px;text-align:right;border-bottom:1px solid var(--grid);white-space:nowrap;font-variant-numeric:tabular-nums}
+th{color:var(--ink2);font-weight:600;background:var(--row-alt);font-size:12px}
+th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:var(--card);z-index:1}
+th:first-child{background:var(--row-alt)}
+tr.click{cursor:pointer} tr.sel td{background:var(--row-alt)}
+.pos{color:var(--good-ink)}.neg{color:var(--crit)}
+.seg{display:inline-flex;border:1px solid var(--grid);border-radius:8px;overflow:hidden;margin:0 6px 8px 0;max-width:100%;overflow-x:auto}
+.seg button{border:0;background:var(--card);color:var(--ink2);padding:6px 11px;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.seg button.on{background:var(--accent);color:var(--on-accent)}
+.btn{border:1px solid var(--grid);background:var(--card);color:var(--ink);border-radius:8px;padding:8px 12px;font:inherit;font-size:13px;cursor:pointer}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.btn:disabled{opacity:.5}
+input,select{font:inherit;font-size:14px;padding:8px;border:1px solid var(--grid);border-radius:8px;background:var(--card);color:var(--ink);min-width:0}
+input[type=range]{width:100%;padding:0}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.chip{border:1px solid var(--grid);border-radius:999px;padding:4px 10px;font-size:12.5px;background:var(--card);color:var(--ink2);cursor:pointer;display:inline-flex;gap:6px;align-items:center}
+.chip.on{border-color:var(--accent);color:var(--accent);font-weight:600}
+.chip i{font-style:normal;color:var(--muted)}
+.chart{width:100%;height:300px}.chart.tall{height:380px}.chart.short{height:220px}
+.alert{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--grid)}
+.alert:last-child{border-bottom:0}.alert .t{flex:1;min-width:0}.alert .d{color:var(--muted);font-size:12px}
+.meter{height:10px;border-radius:5px;background:var(--grid);position:relative;margin:8px 0 4px}
+.meter i{position:absolute;left:0;top:0;bottom:0;border-radius:5px}
+.meter b{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--ink2)}
+.action{border:1px solid var(--grid);border-radius:10px;padding:12px;margin-bottom:10px}
+.action .h{font-weight:600;font-size:14px}
+.verdict{font-size:22px;font-weight:700}
+.hold-row{display:grid;grid-template-columns:1fr 1fr auto;gap:6px;margin-bottom:6px}
+.banner{background:var(--row-alt);border-left:3px solid var(--warn);padding:8px 10px;border-radius:6px;font-size:12.5px;color:var(--ink2);margin-bottom:10px}
+.banner.ok{border-left-color:var(--good)}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--grid);border-top-color:var(--accent);border-radius:50%;animation:sp 0.8s linear infinite;vertical-align:-2px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.empty{padding:20px 6px;text-align:center;color:var(--ink2)}
+.small{font-size:12px}
+details summary{cursor:pointer;color:var(--ink2);font-size:13px}
+.legend{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--ink2);margin:4px 0}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.legend i{width:10px;height:10px;border-radius:2px;display:inline-block}
+.ib{border:1px solid var(--grid);background:var(--card);color:var(--ink2);border-radius:50%;width:18px;height:18px;font-size:11px;line-height:16px;padding:0;margin-left:3px;cursor:pointer;vertical-align:1px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;font-family:Georgia,serif;font-style:italic}
+.ib:before{content:"i"}
+#sheet{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;z-index:50;align-items:flex-end;justify-content:center}
+#sheet.on{display:flex}
+#sheet .box{background:var(--card);color:var(--ink);width:100%;max-width:560px;border-radius:14px 14px 0 0;padding:16px 16px calc(18px + env(safe-area-inset-bottom));max-height:75vh;overflow:auto}
+#sheet h3{margin:0 0 8px;font-size:15px}#sheet p{margin:0 0 8px;color:var(--ink2);font-size:13.5px}#sheet dl{margin:0;font-size:13px}#sheet dt{font-weight:600;margin-top:6px}#sheet dd{margin:0;color:var(--ink2)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Portfolio Risk Monitor</h1>
+  <div class="sub" id="hdr"><span class="spin"></span> 불러오는 중…</div>
+</header>
+<main>
+  <section class="view on" id="v-home"></section>
+  <section class="view" id="v-port"></section>
+  <section class="view" id="v-mkt"></section>
+  <section class="view" id="v-fr"></section>
+  <section class="view" id="v-set"></section>
+</main>
+<nav class="bottom" id="nav">
+  <button data-v="home" class="on"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>홈</button>
+  <button data-v="port"><svg viewBox="0 0 24 24"><path d="M3 7h18v13H3zM8 7V4h8v3"/></svg>내 포트</button>
+  <button data-v="mkt"><svg viewBox="0 0 24 24"><path d="M3 20h18M6 16l4-5 3 3 5-7"/></svg>시장</button>
+  <button data-v="fr"><svg viewBox="0 0 24 24"><path d="M4 20V4M4 20h16M6 17c3-8 7-11 13-12"/></svg>투자선</button>
+  <button data-v="set"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>설정</button>
+</nav>
+<div id="sheet" role="dialog" aria-modal="true"><div class="box" id="sheetBox"></div></div>
+<script src="vendor/plotly-cartesian.min.js"></script>
+<script src="engine.js"></script>
+<script src="ui.js"></script>
+</body>
+</html>

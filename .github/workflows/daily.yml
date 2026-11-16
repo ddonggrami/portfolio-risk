@@ -1,10 +1,16 @@
-name: daily-risk
+name: risk-check
 
 on:
   schedule:
-    # 미국 장 마감 + 데이터 확정 후: 화~토 08:17 KST (= 월~금 23:17 UTC)
-    - cron: "17 23 * * 1-5"
-  workflow_dispatch: {}
+    - cron: "7 14-21 * * 1-5"   # 미장 중 매시간 (한국시간 23:07~06:07)
+    - cron: "17 23 * * 1-5"     # 장 마감 후 확정 점검 (한국시간 08:17, 화~토)
+    - cron: "13 0 * * 0"        # 주간 요약 (한국시간 일요일 09:13)
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "manual"
+        required: false
+        default: "manual"
 
 permissions:
   contents: read
@@ -12,57 +18,71 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
-  cancel-in-progress: true
+  group: risk-check
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+
+      - name: Run kind
+        id: kind
+        run: |
+          case "${{ github.event_name }}:${{ github.event.schedule }}" in
+            workflow_dispatch:*) echo "kind=manual" >> "$GITHUB_OUTPUT" ;;
+            "schedule:13 0 * * 0") echo "kind=weekly" >> "$GITHUB_OUTPUT" ;;
+            "schedule:17 23 * * 1-5") echo "kind=daily" >> "$GITHUB_OUTPUT" ;;
+            *) echo "kind=hourly" >> "$GITHUB_OUTPUT" ;;
+          esac
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
 
+      - name: Restore price cache
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: prices-${{ github.run_id }}
+          restore-keys: prices-
+
       - name: Install
         run: pip install -r requirements.txt
 
-      - name: Self-test (수식 검증)
+      - name: Self-test
         run: python -m pytest -q tests
 
-      - name: Check secrets
+      - name: Build market data + app
         env:
-          PORTFOLIO_YAML: ${{ secrets.PORTFOLIO_YAML }}
-          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
-        run: |
-          if [ -z "$PORTFOLIO_YAML" ]; then echo "::error::Secret PORTFOLIO_YAML 이 없습니다."; exit 1; fi
-          if [ -z "$DASHBOARD_PASSWORD" ]; then echo "::error::Secret DASHBOARD_PASSWORD 가 없습니다. 암호 없이 공개 배포하지 않습니다."; exit 1; fi
-
-      - name: Compute risk
-        env:
-          PORTFOLIO_YAML: ${{ secrets.PORTFOLIO_YAML }}
           TIINGO_API_KEY: ${{ secrets.TIINGO_API_KEY }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          NOTIFY_ONLY_ALERTS: ${{ vars.NOTIFY_ONLY_ALERTS }}
-          DASHBOARD_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
-        run: python run.py --notify --out site/index.html
+        run: python run.py --out site
 
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Encrypt dashboard (비밀번호 보호)
-        env:
-          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+      - name: Engine check (JS vs Python)
         run: |
-          npx --yes staticrypt@3 site/index.html -p "$DASHBOARD_PASSWORD" -d site --short --remember 30 \
-            --template-title "Portfolio Risk Monitor" --template-instructions "비밀번호를 입력하세요" \
-            --template-button "열기" --template-placeholder "비밀번호" --template-remember "30일간 기억"
-          grep -q "staticrypt" site/index.html || { echo "::error::암호화 실패"; exit 1; }
-          touch site/.nojekyll
+          node tests/engine_run.js site engine_out.json
+          python tests/compare_engine.py site engine_out.json > /dev/null
+
+      - name: Previous alert state
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          curl -fsSL "https://${OWNER}.github.io/${{ github.event.repository.name }}/alert_state.enc.json?t=$(date +%s)" -o prev_state.json || echo "이전 상태 없음"
+
+      - name: Alerts
+        env:
+          RUN_KIND: ${{ steps.kind.outputs.kind }}
+          PORTFOLIO_PASSWORD: ${{ secrets.PORTFOLIO_PASSWORD }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DASHBOARD_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+        run: node scripts/alerts.mjs
 
       - uses: actions/upload-pages-artifact@v3
         with:

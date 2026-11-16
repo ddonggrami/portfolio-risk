@@ -142,3 +142,24 @@ def test_lw_cov_preserves_variances():
     x = np.column_stack([rng.normal(0, 0.0001, 500), rng.normal(0, 0.03, 500)])
     S, _ = lw_cov(x)
     assert np.allclose(np.sqrt(np.diag(S)), x.std(axis=0, ddof=1))
+
+
+def test_rs_states():
+    from pvrisk import rs as RS
+    idx = pd.bdate_range("2015-01-01", periods=800)
+    spy = pd.Series(np.linspace(100, 150, 800), idx)
+    up = spy * np.linspace(1, 1.5, 800)            # 꾸준히 S&P500보다 강함
+    sf = RS.state_frame(up, spy, 210)
+    assert sf["state"].iloc[-1] == "강세"
+    down = spy * np.linspace(1.5, 1, 800)
+    assert RS.state_frame(down, spy, 210)["state"].iloc[-1] == "약세"
+
+
+def test_margin_features_no_lookahead():
+    from pvrisk import margin as MG
+    idx = pd.bdate_range("2010-01-01", periods=252 * 6)
+    rng = np.random.default_rng(1)
+    p = pd.Series(100 * np.exp(np.cumsum(rng.normal(0, 0.01, len(idx)))), idx)
+    spy = pd.Series(100 * np.exp(np.cumsum(rng.normal(0, 0.01, len(idx)))), idx)
+    f = MG._features(p, spy)
+    assert f["fwd12"].iloc[-12:].isna().all()     # 마지막 12개월은 미래수익 없음

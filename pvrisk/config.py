@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 def _deep_merge(base: dict, over: dict) -> dict:
     out = copy.deepcopy(base)
     for k, v in (over or {}).items():
-        if isinstance(v, dict) and isinstance(out.get(k), dict) and k not in ("holdings", "targets", "candidates"):
+        if isinstance(v, dict) and isinstance(out.get(k), dict) and k not in ("holdings", "targets", "candidates", "runners"):
             out[k] = _deep_merge(out[k], v)
         else:
             out[k] = copy.deepcopy(v)
@@ -62,6 +62,8 @@ def all_tickers(cfg: dict) -> list[str]:
     for a, b in cfg["watch_pairs"]:
         t += [a, b]
     t += list(cfg["candidates"].keys())
+    t += list((cfg.get("runners") or {}).keys())
+    t += list(cfg.get("frontier_default") or [])
     t += list(PROXIES.values())
     seen, out = set(), []
     for x in t:
@@ -83,4 +85,6 @@ PROXIES = {
     "VLUE": "IWD",
     "SCHD": "DVY",
     "IGV": "XLK",
+    "QQQM": "QQQ",
+    "XLC": "XLK",
 }

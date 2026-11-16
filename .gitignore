@@ -3,4 +3,6 @@ site/
 .cache/
 __pycache__/
 *.pyc
-.staticrypt.json
+.pytest_cache/
+prev_state.json
+engine_out.json
