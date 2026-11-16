@@ -273,7 +273,7 @@ function recHtml() {
       <div class="row" style="margin-top:8px"><button class="btn" data-fr="${i}">투자선에서 보기</button></div></div>`;
   }).join("") + `<p class="note">수익 쪽 신호(상대강도·마진)는 검증상 예측력이 거의 없어 추천 근거에서 제외했습니다.</p>`;
 }
-function bindRec() { document.querySelectorAll("[data-fr]").forEach(b => b.onclick = () => { S.overlay = +b.dataset.fr; S.frIdx = null; S.frZoom = true; go("fr"); }); }
+function bindRec() { document.querySelectorAll("[data-fr]").forEach(b => b.onclick = () => { S.overlay = +b.dataset.fr; S.frIdx = null; S.frZoom = true; S.frZoomRange = null; go("fr"); }); }
 function bindHoldings() {
   const sync = () => { S.holdings = readHoldings(); };
   const ar = $("#addRow"); if (!ar) return;
@@ -394,7 +394,13 @@ function renderFr() {
       <div class="seg" id="frY">${[3, 5, 10].map(y => `<button data-k="${y}" class="${y === f.years ? "on" : ""}">${y}년</button>`).join("")}</div>
       <div class="seg" id="frW">${[[1, "제한 없음"], [0.5, "종목당 50%"], [0.3, "30%"]].map(([k, l]) => `<button data-k="${k}" class="${k === f.maxW ? "on" : ""}">${l}</button>`).join("")}</div>
     </div>
-    <div class="spread"><p class="note" id="frNote" style="flex:1"></p><button class="btn" id="frZoom" hidden>전체 보기</button></div>
+    <p class="note" id="frNote"></p>
+    <div class="row" style="margin-bottom:6px"><button class="btn" id="frZoom" hidden>전체 보기</button><button class="btn" id="frPrevX" hidden>비교선 지우기</button><button class="btn" id="frAxB">축 범위 ${f.axis ? "(직접 설정)" : "(자동 고정)"}</button></div>
+    <div id="frAx" hidden class="card" style="background:var(--row-alt);padding:10px">
+      <p class="desc">자산을 넣고 빼도 축은 그대로 고정됩니다. 직접 정하려면 % 단위로 입력하세요.</p>
+      <div class="grid2"><label class="small">변동성 최소 <input type="number" step="1" id="ax0" style="width:100%"></label><label class="small">변동성 최대 <input type="number" step="1" id="ax1" style="width:100%"></label>
+      <label class="small">기대수익 최소 <input type="number" step="1" id="ay0" style="width:100%"></label><label class="small">기대수익 최대 <input type="number" step="1" id="ay1" style="width:100%"></label></div>
+      <div class="row" style="margin-top:8px"><button class="btn primary" id="axApply">적용</button><button class="btn" id="axAuto">자동으로</button></div></div>
     <div class="chart tall" id="cFr"></div>
     <div class="legend" id="frLeg"></div>
     <h3>감당할 변동성: <span id="frVol"></span></h3>
@@ -405,6 +411,7 @@ function renderFr() {
   el.querySelectorAll(".chips .chip").forEach(c => {
     c.onclick = () => {
       const k = c.dataset.k, off = frOff();
+      if (S.frLast) S.frPrev = { pts: S.frLast, label: `${off.includes(k) ? k + " 넣기" : k + " 빼기"} 전` };
       if (off.includes(k)) off.splice(off.indexOf(k), 1);
       else { if (tk.length <= 2) { $("#frNote").textContent = "자산이 최소 2개는 있어야 투자선을 그릴 수 있습니다."; return; } off.push(k); }
       S.frIdx = null; saveSet(); renderFr();
@@ -415,9 +422,18 @@ function renderFr() {
   $("#frAddB").onclick = () => {
     const t = $("#frAdd").value.trim().toUpperCase().replace(".", "-");
     if (!S.ctx.R[t]) { $("#frNote").textContent = `${t}: 데이터가 없는 티커입니다.`; return; }
+    if (S.frLast) S.frPrev = { pts: S.frLast, label: `${t} 넣기 전` };
     S.set.fr.off = frOff().filter(x => x !== t); if (!all.includes(t)) S.set.fr.extra.push(t); S.frIdx = null; saveSet(); renderFr();
   };
-  [["frM", "method", x => x], ["frY", "years", Number], ["frW", "maxW", Number]].forEach(([id, key, cv]) => el.querySelectorAll(`#${id} button`).forEach(b => b.onclick = () => { S.set.fr[key] = cv(b.dataset.k); saveSet(); S.frIdx = null; renderFr(); }));
+  [["frM", "method", x => x], ["frY", "years", Number], ["frW", "maxW", Number]].forEach(([id, key, cv]) => el.querySelectorAll(`#${id} button`).forEach(b => b.onclick = () => { if (S.frLast) S.frPrev = { pts: S.frLast, label: "설정 변경 전" }; S.set.fr[key] = cv(b.dataset.k); saveSet(); S.frIdx = null; renderFr(); }));
+  $("#frAxB").onclick = () => { const p = $("#frAx"); p.hidden = !p.hidden; };
+  $("#axApply").onclick = () => {
+    const v = ["ax0", "ax1", "ay0", "ay1"].map(id => parseFloat($("#" + id).value) / 100);
+    if (v.some(x => !Number.isFinite(x)) || v[1] <= v[0] || v[3] <= v[2]) { $("#frNote").textContent = "축 범위를 확인하세요 (최소 < 최대)."; return; }
+    S.set.fr.axis = { x: [v[0], v[1]], y: [v[2], v[3]] }; S.frZoom = false; saveSet(); renderFr();
+  };
+  $("#axAuto").onclick = () => { S.set.fr.axis = null; S.frAuto = null; saveSet(); renderFr(); };
+  $("#frPrevX").onclick = () => { S.frPrev = null; renderFr(); };
   later(() => drawFr(tk));
 }
 function drawFr(tk) {
@@ -445,25 +461,44 @@ function drawFr(tk) {
       ann.push({ x: p.vol, y: p.ret, ax: cur.vol, ay: cur.ret, xref: "x", yref: "y", axref: "x", ayref: "y", showarrow: true, arrowhead: 2, arrowsize: 1, arrowwidth: on ? 2 : 1, arrowcolor: on ? css("--s2") : css("--axis"), text: "" });
     });
   }
+  if (S.frPrev) traces.unshift({ x: S.frPrev.pts.map(p => p[0]), y: S.frPrev.pts.map(p => p[1]), mode: "lines", name: S.frPrev.label, line: { color: css("--muted"), width: 1.5, dash: "dash" }, hovertemplate: `${esc(S.frPrev.label)}<br>변동성 %{x:.1%}<br>기대수익 %{y:.1%}<extra></extra>` });
+  S.frLast = P.map(p => [p.vol, p.ret]);
   const sel = P[S.frIdx];
   const vline = x => ({ type: "line", x0: x, x1: x, yref: "paper", y0: 0, y1: 1, line: { color: css("--muted"), width: 1, dash: "dot" } });
-  let xr, yr;
+  // 축 고정: 목록의 모든 자산(꺼진 것 포함)으로 범위를 한 번 정하고, 이후에는 넓어지기만 함
+  const akey = [f.method, f.years, f.maxW].join("|");
+  if (!S.frAuto || S.frAuto.key !== akey) {
+    let xs = [0], ys = [];
+    const allTk = frAll(), Ma = E.monthly(S.ctx, allTk, f.years);
+    if (Ma.rows.length >= 24) { const ea = E.expected(Ma, f.method, S.set.erp); allTk.forEach((t, i) => { xs.push(Math.sqrt(ea.S[i][i])); ys.push(ea.mu[i]); }); ys.push(ea.rf); }
+    S.frAuto = { key: akey, x: [0, Math.max(...xs)], y: ys.length ? [Math.min(...ys), Math.max(...ys)] : [0, 0.1] };
+  }
+  const ext = [...P.map(p => [p.vol, p.ret]), ...tk.map((t, i) => [Math.sqrt(ex.S[i][i]), ex.mu[i]]), ...(cur ? [[cur.vol, cur.ret]] : [])];
+  S.frAuto.x = [0, Math.max(S.frAuto.x[1], ...ext.map(e => e[0]))];
+  S.frAuto.y = [Math.min(S.frAuto.y[0], ...ext.map(e => e[1])), Math.max(S.frAuto.y[1], ...ext.map(e => e[1]))];
+  const padY = (S.frAuto.y[1] - S.frAuto.y[0]) * 0.1;
+  let xr = f.axis ? f.axis.x : [S.frAuto.x[0], S.frAuto.x[1] * 1.08], yr = f.axis ? f.axis.y : [S.frAuto.y[0] - padY, S.frAuto.y[1] + padY * 1.5];
+  ["ax0", "ax1", "ay0", "ay1"].forEach((id, k) => { const el = $("#" + id); if (el && el.value === "") el.value = ((k < 2 ? xr : yr)[k % 2] * 100).toFixed(1); });
   const showActs = cur && S.rec && S.overlay !== null;
   if (S.frZoom === undefined) S.frZoom = !!showActs;
-  if (cur && S.frZoom) {
+  if (cur && S.frZoom && S.frZoomRange && S.frZoomRange.key === akey) { xr = S.frZoomRange.x; yr = S.frZoomRange.y; }
+  else if (cur && S.frZoom) {
     const pts = [cur, ...(showActs ? S.rec.actions.filter(a => Object.keys(a.w1).every(t => tk.includes(t === E.CASH ? "SGOV" : t))).map(a => E.point(ex, tk, map(a.w1))) : [])], vs = pts.map(p => p.vol), rs = pts.map(p => p.ret);
     const dx = Math.max(0.03, (Math.max(...vs) - Math.min(...vs)) * 0.6), dy = Math.max(0.015, (Math.max(...rs) - Math.min(...rs)) * 0.6);
     xr = [Math.min(...vs) - dx, Math.max(...vs) + dx]; yr = [Math.min(...rs) - dy, Math.max(...rs) + dy];
+    S.frZoomRange = { key: akey, x: xr, y: yr };  // 확대 범위도 고정 (자산을 넣고 빼도 그대로)
   }
-  plot("cFr", traces, { xaxis: AX({ tickformat: xr ? ".1%" : ".0%", title: { text: "연 변동성", font: { size: 11 } }, rangemode: xr ? undefined : "tozero", range: xr }), yaxis: AX({ tickformat: yr ? ".1%" : ".0%", title: { text: "기대수익(연)", font: { size: 11 } }, range: yr }), annotations: ann, shapes: [vline(sel.vol)] });
-  const zb = $("#frZoom"); if (zb) { zb.hidden = !cur; zb.textContent = S.frZoom ? "전체 보기" : (showActs ? "변경안 주변 확대" : "현재 포트 주변 확대"); zb.onclick = () => { S.frZoom = !S.frZoom; drawFr(tk); }; }
-  $("#frLeg").innerHTML = `<span><i style="background:var(--s1)"></i>투자선</span><span><i style="background:var(--s3)"></i>최대 샤프</span>${cur ? '<span><i style="background:var(--s8)"></i>현재 포트(★)</span>' : ""}${S.overlay !== null && S.rec ? '<span><i style="background:var(--s2)"></i>추천 변경안(번호)</span>' : ""}<span><i style="background:var(--axis)"></i>개별 자산</span>`;
+  const fine = (xr[1] - xr[0]) < 0.12;
+  plot("cFr", traces, { xaxis: AX({ tickformat: fine ? ".1%" : ".0%", title: { text: "연 변동성", font: { size: 11 } }, range: xr }), yaxis: AX({ tickformat: (yr[1] - yr[0]) < 0.06 ? ".1%" : ".0%", title: { text: "기대수익(연)", font: { size: 11 } }, range: yr }), annotations: ann, shapes: [vline(sel.vol)] });
+  const px = $("#frPrevX"); if (px) px.hidden = !S.frPrev;
+  const zb = $("#frZoom"); if (zb) { zb.hidden = !cur; zb.textContent = S.frZoom ? "전체 보기" : (showActs ? "변경안 주변 확대" : "현재 포트 주변 확대"); zb.onclick = () => { S.frZoom = !S.frZoom; S.frZoomRange = null; drawFr(tk); }; }
+  $("#frLeg").innerHTML = `<span><i style="background:var(--s1)"></i>투자선</span>${S.frPrev ? `<span><i style="background:var(--muted)"></i>${esc(S.frPrev.label)}(점선)</span>` : ""}<span><i style="background:var(--s3)"></i>최대 샤프</span>${cur ? '<span><i style="background:var(--s8)"></i>현재 포트(★)</span>' : ""}${S.overlay !== null && S.rec ? '<span><i style="background:var(--s2)"></i>추천 변경안(번호)</span>' : ""}<span><i style="background:var(--axis)"></i>개별 자산</span>`;
   // 비중 변화 (8개 넘으면 평균 비중 작은 것부터 '기타'로)
   const avg = tk.map((t, j) => [t, j, P.reduce((s, p) => s + p.w[j], 0)]).sort((a, b) => b[2] - a[2]);
   const main = avg.slice(0, 7), rest = avg.slice(7), groups = main.map(([t, j]) => [t, [j]]); if (rest.length) groups.push(["기타", rest.map(x => x[1])]);
   if (avg.length === 8) { groups.pop(); groups.push([avg[7][0], [avg[7][1]]]); }
   plot("cTr", groups.map(([t, js], i) => ({ x: P.map(p => p.vol), y: P.map(p => js.reduce((s, j) => s + p.w[j], 0)), stackgroup: "w", name: t, mode: "lines", line: { width: 0.5, color: css("--card") }, fillcolor: css(SER[i % 8]), hovertemplate: `${t} %{y:.0%}<extra></extra>` })),
-    { showlegend: true, hovermode: "x unified", xaxis: AX({ tickformat: ".0%", title: { text: "연 변동성", font: { size: 11 } } }), yaxis: AX({ tickformat: ".0%", range: [0, 1] }), shapes: [vline(sel.vol)], legend: { orientation: "h", y: -0.25 } });
+    { showlegend: true, hovermode: "x unified", xaxis: AX({ tickformat: fine ? ".1%" : ".0%", title: { text: "연 변동성", font: { size: 11 } }, range: xr }), yaxis: AX({ tickformat: ".0%", range: [0, 1] }), shapes: [vline(sel.vol)], legend: { orientation: "h", y: -0.25 } });
   const showW = () => {
     const p = P[S.frIdx]; $("#frVol").textContent = `${pct(p.vol)} → 기대수익 ${pct(p.ret)} (샤프 ${num((p.ret - ex.rf) / p.vol)})`;
     const cw = cur ? cur.v : null;
