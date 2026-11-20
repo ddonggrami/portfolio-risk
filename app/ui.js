@@ -294,8 +294,14 @@ function bindHoldings() {
     sync(); S.holdings = S.holdings.filter(h => h.t && h.shares > 0); S.cash = +($("#cash").value || 0);
     LS.set("holdings", S.holdings); LS.set("cash", S.cash);
     const unk = S.holdings.filter(h => !S.ctx.R[h.t]).map(h => h.t);
-    $("#hmsg").textContent = unk.length ? `저장됨. ${unk.join(", ")}는 다음 점검부터 반영` : "저장됨";
+    const msg = unk.length ? `저장됨. ${unk.join(", ")}는 다음 점검부터 반영` : "저장됨";
     computePort(); renderPort(); renderHome();
+    const pw = LS.get("pw", "");
+    if (S.token && pw) {
+      $("#hmsg").innerHTML = msg + ' · <span class="spin"></span> 알림 서버에 올리는 중';
+      syncUp(pw).then(() => { const m = $("#hmsg"); if (m) m.textContent = msg + " · 알림 서버에도 반영됨"; })
+        .catch(e => { const m = $("#hmsg"); if (m) m.textContent = msg + " · 알림 서버 반영 실패: " + (e.message || e); });
+    } else $("#hmsg").textContent = msg + (S.token ? "" : " (알림 서버 반영은 설정에서 한 번 연결)");
   };
 }
 
@@ -591,8 +597,9 @@ function renderSet() {
     <div class="row" style="margin-top:8px"><button class="btn" id="tokSave">토큰 저장</button><button class="btn" id="tokDel">토큰 삭제</button></div>
     <h3>알림용 보유내역 동기화</h3>
     <p class="desc">보유내역을 비밀번호로 암호화(AES-256)해서 저장소에 올립니다. 서버는 GitHub Secret의 PORTFOLIO_PASSWORD로만 풀 수 있으니 같은 비밀번호를 쓰세요.</p>
-    <input type="password" id="pw" placeholder="비밀번호 (Secret과 동일)" style="width:100%">
-    <div class="row" style="margin-top:8px"><button class="btn primary" id="syncB">암호화해서 올리기</button><span class="note" id="syncMsg"></span></div></div>
+    <input type="password" id="pw" placeholder="비밀번호 (Secret과 동일)" value="${LS.get("pw", "") ? "••••••••" : ""}" style="width:100%">
+    <label class="small" style="display:flex;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="pwKeep" ${LS.get("pw", "") ? "checked" : ""}> 이 휴대폰에 기억하고, 내 포트에서 저장할 때마다 자동으로 올리기</label>
+    <div class="row" style="margin-top:8px"><button class="btn primary" id="syncB">암호화해서 올리기</button><span class="note" id="syncMsg">${S.token && LS.get("pw", "") ? "자동 동기화 켜짐" : ""}</span></div></div>
   <div class="card"><h2>방법과 검증</h2>
     <details><summary>VaR</summary><p class="desc">원화 기준(달러 수익 × 환율 변화). 부트스트랩: 최근 10년 일간 수익을 21일 블록으로 1만 경로 재표본, 기대 초과수익 0. EWMA: λ=0.94(RiskMetrics). 역사적: 최근 250일(바젤). 극단값은 제거하지 않음.</p></details>
     <details><summary>상관·짝 찾기</summary><p class="desc">달러 수익률, 1·3·6·12개월 창. 하락장 상관 = 기준 자산이 떨어진 날만. 6개월 상관의 다음 6개월 예측력 0.89, 하락장 상관 0.81로 검증.</p></details>
@@ -611,12 +618,13 @@ function renderSet() {
   $("#tokSave").onclick = () => { const v = $("#tok").value.trim(); if (v && !v.startsWith("•")) { S.token = v; LS.set("token", v); } S.set.repo = $("#repo").value.trim(); saveSet(); renderSet(); };
   $("#tokDel").onclick = () => { S.token = ""; LS.del("token"); renderSet(); };
   $("#syncB").onclick = async () => {
-    const pw = $("#pw").value; const m = $("#syncMsg");
+    let pw = $("#pw").value; const m = $("#syncMsg");
+    if (pw.startsWith("•")) pw = LS.get("pw", "");
     if (!pw || pw.length < 8) { m.textContent = "비밀번호 8자 이상"; return; } if (!S.token) { m.textContent = "먼저 토큰을 저장하세요"; return; }
-    m.innerHTML = '<span class="spin"></span> 암호화·업로드 중'; try { await syncUp(pw); m.textContent = "완료. 다음 점검부터 알림에 반영됩니다."; } catch (e) { m.textContent = String(e.message || e); }
+    m.innerHTML = '<span class="spin"></span> 암호화·업로드 중'; try { await syncUp(pw); if ($("#pwKeep").checked) LS.set("pw", pw); else LS.del("pw"); m.textContent = $("#pwKeep").checked ? "완료. 앞으로는 내 포트에서 저장만 하면 자동으로 올라갑니다." : "완료. 다음 점검부터 알림에 반영됩니다."; } catch (e) { m.textContent = String(e.message || e); }
   };
   $("#theme").onclick = () => { const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); const nx = cur === "dark" ? "light" : "dark"; document.documentElement.dataset.theme = nx; LS.set("theme", nx); renderAll(); };
-  $("#wipe").onclick = () => { ["holdings", "cash", "settings", "token", "returns_date"].forEach(LS.del); location.reload(); };
+  $("#wipe").onclick = () => { ["holdings", "cash", "settings", "token", "pw", "returns_date"].forEach(LS.del); location.reload(); };
 }
 
 // ───────── 라우팅 ─────────
