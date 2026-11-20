@@ -65,6 +65,10 @@ def all_tickers(cfg: dict) -> list[str]:
     t += list((cfg.get("runners") or {}).keys())
     t += list(cfg.get("frontier_default") or [])
     t += list(PROXIES.values())
+    # 앱에서 동기화한 보유종목 (scripts/extra_tickers.mjs 가 만든 목록)
+    ef = os.environ.get("EXTRA_TICKERS_FILE", "extra_tickers.txt")
+    if Path(ef).exists():
+        t += [x.strip() for x in Path(ef).read_text().splitlines() if x.strip()]
     seen, out = set(), []
     for x in t:
         if x and x not in seen and x != "TBILL":

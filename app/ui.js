@@ -228,7 +228,7 @@ function renderPort() {
   const P = S.port;
   if (P && !P.empty) {
     const W = P.W, d = P.diag, V = d.V, C = d.C, m = S.set.varMethod;
-    if (W.missing.length) html += `<div class="banner">${W.missing.join(", ")}: 아직 데이터가 없습니다. 설정에서 동기화한 뒤 '지금 점검'을 누르면 다음 점검부터 반영됩니다.</div>`;
+    if (W.missing.length) html += `<div class="banner">${W.missing.join(", ")}: 아직 시세 데이터가 없어 계산에서 빠져 있습니다. 보유내역이 알림 서버에 올라가 있으면 다음 자동 점검 때 시세를 받아옵니다(홈의 '지금 점검'을 누르면 3~5분).</div>`;
     const vl = { "양호": "ok", "보통": "warning", "점검 필요": "critical" }[d.verdict];
     html += `<div class="card"><div class="spread"><h2>진단</h2>${badge(vl, d.verdict)}</div>
       ${d.items.map(i => `<div class="alert">${badge(["ok", "warning", "critical"][i.level], i.label)}<div class="t">${esc(i.text)}</div></div>`).join("")}

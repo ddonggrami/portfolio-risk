@@ -56,14 +56,19 @@ jobs:
       - name: Self-test
         run: python -m pytest -q tests
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Holdings tickers (encrypted → ticker list only)
+        env:
+          PORTFOLIO_PASSWORD: ${{ secrets.PORTFOLIO_PASSWORD }}
+        run: node scripts/extra_tickers.mjs
+
       - name: Build market data + app
         env:
           TIINGO_API_KEY: ${{ secrets.TIINGO_API_KEY }}
         run: python run.py --out site
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
 
       - name: Engine check (JS vs Python)
         run: |

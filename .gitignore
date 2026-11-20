@@ -6,3 +6,4 @@ __pycache__/
 .pytest_cache/
 prev_state.json
 engine_out.json
+extra_tickers.txt
