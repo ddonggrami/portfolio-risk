@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       reason:
-        description: "manual = 지금 점검 결과, weekly = 주간 리포트 테스트"
+        description: "manual = 지금 점검 결과, weekly = 주간 리포트 테스트, deploy = 앱만 갱신(알림은 변화가 있을 때만)"
         required: false
         default: "manual"
 
@@ -32,7 +32,7 @@ jobs:
         id: kind
         run: |
           case "${{ github.event_name }}:${{ github.event.schedule }}" in
-            workflow_dispatch:*) if [ "${{ github.event.inputs.reason }}" = "weekly" ]; then echo "kind=weekly" >> "$GITHUB_OUTPUT"; else echo "kind=manual" >> "$GITHUB_OUTPUT"; fi ;;
+            workflow_dispatch:*) case "${{ github.event.inputs.reason }}" in weekly) echo "kind=weekly" >> "$GITHUB_OUTPUT" ;; deploy) echo "kind=hourly" >> "$GITHUB_OUTPUT" ;; *) echo "kind=manual" >> "$GITHUB_OUTPUT" ;; esac ;;
             "schedule:13 0 * * 0") echo "kind=weekly" >> "$GITHUB_OUTPUT" ;;
             "schedule:17 23 * * 1-5") echo "kind=daily" >> "$GITHUB_OUTPUT" ;;
             *) echo "kind=hourly" >> "$GITHUB_OUTPUT" ;;

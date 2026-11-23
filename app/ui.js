@@ -86,6 +86,12 @@ const INFO = {
      ["다시 늘릴 때", "사용률이 70% 아래로 내려오고 위험자산이 기본 비중(목표비중의 위험자산 합)보다 작으면, 90%가 되는 선까지 목표 비율대로 다시 삽니다."],
      ["분기초 평가액", "지금 보유 수량을 직전 분기 마지막 거래일 종가(원화)로 계산한 값입니다. 분기 중에 매매했다면 약간 다를 수 있습니다."],
      ["근거", "2018~2026 백테스트(원화): 연수익 19.8%, 변동성 16.7%, 최대낙폭 −25.9%. 그대로 보유는 25.9% / 30.1% / −51.5%."]]],
+  "한도 맞춤 재편안": ["한도 맞춤 재편안", "1년 95% VaR 사용률을 목표(기본 90%)까지 낮추는 방법을 세 가지로 계산합니다. 각 안은 정수 주로 맞춘 뒤 VaR를 다시 계산했습니다.",
+    [["① 같은 비율로 줄이기", "위험자산 안의 목표 비율은 그대로 두고 전체 크기만 줄여 SGOV로. 리밸런싱 규칙과 충돌이 없는 기본안."],
+     ["② 위험 큰 종목 위주", "1%p를 SGOV로 옮겼을 때 VaR가 가장 많이 줄어드는 종목부터 팝니다. 매매 건수가 적지만 목표 비율에서 벗어납니다."],
+     ["③ 다른 ETF 편입", "시장·후보 목록의 ETF(이력 5년 이상) 중, 일부(10~30%)를 편입하고 나머지 초과분만 SGOV로 옮겼을 때 균형 기대수익이 가장 높게 남는 조합. ①보다 나을 때만 표시합니다."],
+     ["주의", "VaR는 최근 10년 표본 기준입니다. 채권처럼 과거에 주식과 반대로 움직였던 자산은 그 관계가 바뀌면(2022년처럼) 효과가 줄어듭니다."]]],
+  "균형 기대수익": ["균형 기대수익", "각 ETF의 S&P500 대비 베타 × 주식 위험프리미엄 + 무위험금리(최근 5년 월간). 최근 성과를 따라가지 않는 중립적인 기준으로, 재편안끼리 '수익 여지를 얼마나 남겼는지' 비교하는 용도입니다. 예측이 아닙니다.", []],
   "견고한 개선": ["견고한 개선", "과거 평균·축소 추정·시장 균형 <b>세 가지 기대수익 가정 모두</b>에서 샤프 비율이 좋아지는 변경안입니다. 수익 예측이 틀려도 개선될 가능성이 높습니다.", []],
   "리밸런싱": ["리밸런싱 규칙", "설정에서 고른 규칙에 따라 알림과 아래 비교표가 달라집니다.",
     [["정기", "주기 말마다 무조건 목표비중으로."], ["허용범위 이탈 시", "목표 ±절대 %p 또는 목표의 ±상대 % 중 좁은 쪽을 벗어나는 날 즉시. 국민연금 SAA 허용범위 방식."], ["정기 점검 + 허용범위", "주기 말에만 확인하고, 벗어났을 때만 매매. 매매 횟수가 가장 적음(Vanguard 권장 방식)."],
@@ -151,7 +157,20 @@ function computePort() {
   const alerts = E.alerts(S.ctx, W.w, W.nav, diag, { limit: S.set.limit, targets: S.set.targets, ddWarn: S.set.ddWarn, moveTh: S.set.moveTh, dupTh: set.dupTh, rule: S.set.rule });
   S.port = { W, diag, alerts, set };
   S.rec = null;
-  later(() => { S.rec = E.recommend(S.ctx, W.w, W.nav, diag, set); if (S.view === "port") renderPort(); if (S.view === "home") renderHome(); if (S.view === "fr") renderFr(); });
+  S.plans = null; S.simRes = null;
+  later(() => {
+    S.rec = E.recommend(S.ctx, W.w, W.nav, diag, set);
+    if (diag.util > 1) calcPlans(S.planTarget || 0.9, true);
+    if (S.view === "port") renderPort(); if (S.view === "home") renderHome(); if (S.view === "fr") renderFr();
+  });
+}
+
+function curHoldings() { return S.holdings.filter(h => h.t && h.shares > 0); }
+function calcPlans(target, quiet) {
+  const P = S.port; if (!P || P.empty) return;
+  S.planTarget = target;
+  S.plans = E.limitPlans(S.ctx, curHoldings(), +S.cash || 0, P.diag.limAmt, { target, targets: S.set.targets, erp: P.set.erp || S.market.defaults.erp });
+  if (!quiet && S.view === "port") renderPort();
 }
 
 // ───────── 헤더 ─────────
@@ -257,6 +276,7 @@ function renderPort() {
       ${d.qStart ? `<p class="note">분기초(${d.qStart.date}) 평가액 ${won(d.qStart.value)}의 ${pct(S.set.limit.pct, 0)} · 분기 들어 ${sg(d.qStart.chg)} · 위험자산 비중 ${pct(d.riskyK, 0)}${d.k0 ? ` (기본 ${pct(d.k0, 0)})` : ""}</p>` : ""}
       <div class="meter" role="img" aria-label="사용률 ${pct(util, 0)}"><i style="width:${Math.min(util, 1.5) / 1.5 * 100}%;background:var(${ucol})"></i><b style="left:${100 / 1.5}%"></b></div>
       <div class="note">사용률 ${pct(util, 0)} (부트스트랩 기준) · 세로선 = 한도 100%</div>${limActHtml(d)}</div>`;
+    html += plansCard(d) + simCard();
     // 추천
     html += `<div class="card"><h2>지금 할 일</h2><p class="desc">예측이 잘 되는 위험(상관·변동성·중복 노출)을 근거로 고른 변경안. 기대수익 가정 세 가지 모두에서 샤프가 좋아지면 '견고한 개선'.</p><div id="recBox">${S.rec ? recHtml() : spin("편입·편출 효과 계산 중…")}</div></div>`;
     // 스트레스
@@ -277,17 +297,121 @@ function renderPort() {
   el.innerHTML = html;
   bindHoldings();
   const vs = $("#varSeg"); if (vs) vs.querySelectorAll("button").forEach(b => b.onclick = () => { S.set.varMethod = b.dataset.k; saveSet(); renderPort(); });
-  bindRec();
+  bindRec(); bindPlans(); bindSim();
 }
 function limActHtml(d) {
   const a = d.limAct;
   if (!a) return `<p class="note" style="margin-top:6px">조치 필요 없음 · 105% 넘으면 줄이고, 70% 아래면서 위험자산이 기본 비중보다 작으면 다시 늘립니다.</p>`;
+  if (a.kind === "cut") return `<div class="banner" style="margin-top:10px">한도 초과 — 위험자산 ${pct(a.k, 0)} → ${pct(a.kNew, 0)} 수준으로 줄여야 합니다. 바로 아래 <b>한도 맞춤 재편안</b>에서 방법 세 가지(같은 비율로 줄이기 / 위험 큰 종목 위주 / 다른 ETF 편입)와 주수를 확인하세요.</div>`;
   const fx = S.market.meta.fx_now, lp = S.market.last_px;
   const rows = Object.entries(a.trades).filter(([, v]) => Math.abs(v) >= 1e4).sort((x, y) => Math.abs(y[1]) - Math.abs(x[1]))
     .map(([t, v]) => [t, `${v > 0 ? "매수" : "매도"} ${won(Math.abs(v))}`, lp[t] ? `약 ${Math.round(Math.abs(v) / (lp[t] * fx))}주` : "–"]);
   if (lp.SGOV) rows.push(["SGOV", `${a.kind === "cut" ? "매수" : "매도"} ${won(a.amt)}`, `약 ${Math.round(a.amt / (lp.SGOV * fx))}주`]);
   return `<div class="action" style="margin-top:10px"><div class="spread"><span class="h">${a.kind === "cut" ? "한도 초과 — 위험자산 줄이기" : "여유 생김 — 위험자산 다시 늘리기"}</span>${badge(a.kind === "cut" ? "critical" : "info", `${pct(a.k, 0)} → ${pct(a.kNew, 0)}`)}</div>
     ${table(["종목", "매매", "주수"], rows)}<p class="note">${a.kind === "cut" ? "모든 위험자산을 같은 비율로 줄여 위험자산 안의 비율은 그대로 둡니다." : "목표비중의 위험자산 안 비율대로 삽니다."} 주수는 오늘 가격 기준 근사입니다.</p></div>`;
+}
+// ───────── 한도 맞춤 재편안 ─────────
+const wonS = x => (x > 0 ? "+" : x < 0 ? "−" : "") + won(Math.abs(x));
+function tradeTable(T) {
+  return table(["종목", "매매", "주수", "금액"], T.map(x => [x.t, x.d > 0 ? '<span class="pos">매수</span>' : '<span class="neg">매도</span>', `${x.from} → <b>${x.to}</b> (${x.d > 0 ? "+" : ""}${Math.round(x.d * 1000) / 1000})`, x.amt === null ? "–" : wonS(x.amt)]));
+}
+function plansCard(d) {
+  const tg = S.planTarget || 0.9, P = S.plans;
+  let body;
+  if (!P) body = d.util > 1 ? spin("재편안 계산 중…") : `<p class="desc">지금은 한도 안(사용률 ${pct(d.util, 0)})이라 자동으로 계산하지 않았습니다. 미리 보려면 목표 사용률을 고르고 '계산'을 누르세요.</p>`;
+  else if (!P.need) body = `<p class="desc">현재 사용률 ${pct(P.util0, 0)}로 이미 목표(${pct(tg, 0)}) 안입니다.</p>`;
+  else if (!P.plans.length) body = `<p class="desc">위험자산을 모두 줄여도 목표에 닿지 않습니다.</p>`;
+  else body = P.plans.map((p, i) => {
+    const c = p.check;
+    return `<div class="action"><div class="spread"><span class="h">${["①", "②", "③", "④", "⑤"][i]} ${esc(p.title)}</span>${badge(c.util <= 1 ? "ok" : "critical", `사용률 ${pct(c.util, 0)}`)}</div>
+      <div class="note" style="margin:4px 0 8px">${esc(p.why)}</div>
+      <div class="grid2 g-md-3">
+        <div class="kpi"><div class="l">1년 95% VaR</div><div class="v">${won(c.var1y)}</div><div class="s">현재 ${won(P.var0)}</div></div>
+        <div class="kpi"><div class="l">균형 기대수익 ${ib("균형 기대수익")}</div><div class="v">${pct(p.er1, 1)}</div><div class="s">현재 ${pct(p.er0, 1)} · 연</div></div>
+        <div class="kpi"><div class="l">최악의 위기</div><div class="v">${c.worst ? sg(c.worst.krw) : "–"}</div><div class="s">${c.worst ? esc(c.worst.name) : ""}</div></div>
+      </div>
+      <details style="margin-top:8px"><summary>매매 ${p.trades.length}건 보기 (주수)</summary>${tradeTable(p.trades)}<p class="note">매매 후 남는 원화 현금 약 ${won(p.cash)}. 오늘 가격·환율 기준, 정수 주로 맞춘 뒤 VaR를 다시 계산한 값입니다.</p></details>
+      <div class="row" style="margin-top:8px"><button class="btn" data-plan="${i}">시뮬레이터에 넣기</button></div></div>`;
+  }).join("") + `<p class="note">균형 기대수익이 높을수록 같은 한도 안에서 수익 여지를 더 남긴 안입니다. ③ 이후는 후보 ETF 중 최대 30%까지 편입해 보고 가장 나은 것만 보여줍니다. 계산 창: 최근 ${P.years}년.</p>`;
+  return `<div class="card"><h2>한도 맞춤 재편안 ${ib("한도 맞춤 재편안")}</h2>
+    <div class="row"><label class="small">목표 사용률</label><select id="planT">${[0.7, 0.8, 0.9, 1].map(x => `<option value="${x}" ${Math.abs(x - tg) < 1e-9 ? "selected" : ""}>${pct(x, 0)}</option>`).join("")}</select><button class="btn" id="planGo">계산</button><span class="note">한도 ${won(d.limAmt)}</span></div>
+    <div id="planBox" style="margin-top:8px">${body}</div></div>`;
+}
+function bindPlans() {
+  const g = $("#planGo"); if (!g) return;
+  g.onclick = () => { $("#planBox").innerHTML = spin("재편안 계산 중…"); later(() => calcPlans(+$("#planT").value)); };
+  document.querySelectorAll("[data-plan]").forEach(b => b.onclick = () => {
+    const p = S.plans.plans[+b.dataset.plan]; const H0 = curHoldings();
+    const rows = H0.map(h => ({ t: h.t, now: h.shares, shares: 0 }));
+    for (const h of p.holdings) { const r = rows.find(x => x.t === h.t); if (r) r.shares = h.shares; else rows.push({ t: h.t, now: 0, shares: h.shares }); }
+    S.sim = { rows }; runSim(); renderPort(); const el = $("#simCard"); if (el) el.scrollIntoView({ behavior: "smooth" });
+  });
+}
+// ───────── 재편 시뮬레이션 ─────────
+function simRows() { if (!S.sim) S.sim = { rows: curHoldings().map(h => ({ t: h.t, now: h.shares, shares: h.shares })) }; return S.sim.rows; }
+function simCard() {
+  const opts = E.tickers(S.ctx).sort().map(t => `<option value="${t}">${esc(S.market.names[t] || "")}</option>`).join("");
+  const R = simRows(), lp = S.market.last_px, fx = S.market.meta.fx_now;
+  let html = `<div class="card" id="simCard"><h2>재편 시뮬레이션</h2><p class="desc">바꿀 주수를 넣고 '계산'을 누르면 같은 한도·같은 계산 창으로 지금과 비교합니다. 매매 차액은 원화 현금으로 처리합니다.</p>
+    <datalist id="tk2">${opts}</datalist>
+    <div class="tbl"><table><thead><tr><th>종목</th><th>지금</th><th>바꾼 뒤</th><th>평가액</th></tr></thead><tbody>${R.map((r, i) => `<tr>
+      <td>${r.now ? esc(r.t) : `<input list="tk2" data-st="${i}" value="${esc(r.t)}" placeholder="티커" style="width:84px" autocapitalize="characters">`}</td><td>${r.now || 0}</td>
+      <td><input type="number" inputmode="decimal" data-ss="${i}" value="${r.shares}" style="width:80px"></td><td class="small">${lp[r.t] ? won(r.shares * lp[r.t] * fx) : "–"}</td></tr>`).join("")}</tbody></table></div>
+    <div class="row" style="margin-top:8px"><button class="btn" id="simAdd">+ 종목 추가</button><button class="btn" id="simReset">지금으로 되돌리기</button><button class="btn primary" id="simGo">계산</button></div>
+    <div id="simOut" style="margin-top:10px">${S.simRes ? simResHtml() : ""}</div></div>`;
+  return html;
+}
+function readSim() {
+  const R = simRows();
+  document.querySelectorAll("[data-ss]").forEach(el => { const v = parseFloat(el.value); R[+el.dataset.ss].shares = Number.isFinite(v) && v > 0 ? v : 0; });
+  document.querySelectorAll("[data-st]").forEach(el => { R[+el.dataset.st].t = el.value.trim().toUpperCase().replace(".", "-"); });
+}
+function runSim() {
+  const P = S.port, R = simRows(), lp = S.market.last_px, fx = S.market.meta.fx_now;
+  const H0 = curHoldings(), H1 = R.filter(r => r.t && r.shares > 0).map(r => ({ t: r.t, shares: r.shares }));
+  const unknown = H1.filter(h => !S.ctx.R[h.t] || !lp[h.t]).map(h => h.t);
+  const val = H => H.reduce((a, h) => a + (lp[h.t] ? h.shares * lp[h.t] * fx : 0), 0);
+  const cash0 = +S.cash || 0, diff = val(H0) - val(H1), cash1 = Math.max(0, cash0 + diff);
+  const C = E.compareHoldings(S.ctx, H0, cash0, H1.filter(h => unknown.indexOf(h.t) < 0), cash1, { limAmt: P.diag.limAmt, erp: P.set.erp || S.market.defaults.erp });
+  S.simRes = { C, cash0, cash1, deposit: Math.max(0, -(cash0 + diff)), unknown, H1 };
+}
+function simResHtml() {
+  const { C, cash1, deposit, unknown } = S.simRes, a = C.a, b = C.b;
+  if (!b) return `<p class="desc">계산할 종목이 없습니다.</p>`;
+  const row = (lab, x, y, f, better) => { const d = Number.isFinite(x) && Number.isFinite(y) ? y - x : null; return [lab, f(x), `<b>${f(y)}</b>`, d === null || Math.abs(d) < 1e-9 ? "" : `<span class="${better === "none" ? "" : (better === "low" ? d < 0 : d > 0) ? "pos" : "neg"}">${better === "low" ? (d < 0 ? "▼" : "▲") : (d > 0 ? "▲" : "▼")}</span>`]; };
+  const rows = [
+    row("평가액(현금 포함)", a.nav, b.nav, won), row("SGOV·현금 외 비중", a.k, b.k, x => pct(x, 0), "none"),
+    row("1년 95% VaR", a.var1y, b.var1y, won, "low"), row("한도 사용률", a.util, b.util, x => pct(x, 0), "low"),
+    row("1년 95% ES", a.es1y, b.es1y, won, "low"), row("1개월 95% VaR", a.var1m, b.var1m, won, "low"), row("1일 99% VaR", a.var1d99, b.var1d99, won, "low"),
+    row("연변동성(최근)", a.volNow, b.volNow, x => pct(x, 1), "low"), row("연변동성(3년)", a.vol3y, b.vol3y, x => pct(x, 1), "low"),
+    row("최악의 위기", a.worst && a.worst.krw, b.worst && b.worst.krw, x => pct(x, 1)), row("균형 기대수익(연)", a.er, b.er, x => pct(x, 1)),
+  ];
+  return `${badge(b.util <= 1 ? "ok" : "critical", b.util <= 1 ? "한도 안" : "한도 초과")}
+    ${table(["", "지금", "바꾼 뒤", ""], rows)}
+    <p class="note">VaR 계산 창: 두 포트 공통 구간의 최근 ${b.years}년 · 한도 ${won(S.port.diag.limAmt)} 고정 · 최악의 위기: ${b.worst ? esc(b.worst.name) : "–"}</p>
+    ${unknown.length ? `<div class="banner">${unknown.join(", ")}: 시세 데이터가 없어 계산에서 뺐습니다.</div>` : ""}
+    ${deposit > 0 ? `<div class="banner">매수가 매도보다 ${won(deposit)} 많습니다 — 추가 입금으로 가정했습니다.</div>` : `<p class="note">매매 후 원화 현금 ${won(cash1)}</p>`}
+    ${C.trades.length ? `<h3>매매 목록</h3>${tradeTable(C.trades)}` : ""}
+    <div class="row" style="margin-top:8px"><button class="btn" id="simApply">이 구성으로 보유내역 바꾸기</button><span class="note" id="simMsg"></span></div>`;
+}
+function bindSim() {
+  const go = $("#simGo"); if (!go) return;
+  document.querySelectorAll("[data-ss],[data-st]").forEach(el => el.oninput = readSim);
+  $("#simAdd").onclick = () => { readSim(); simRows().push({ t: "", now: 0, shares: 0 }); renderPort(); };
+  $("#simReset").onclick = () => { S.sim = null; S.simRes = null; renderPort(); };
+  go.onclick = () => { readSim(); $("#simOut").innerHTML = spin("계산 중…"); later(() => { runSim(); $("#simOut").innerHTML = simResHtml(); bindSimApply(); }); };
+  bindSimApply();
+}
+function bindSimApply() {
+  const b = $("#simApply"); if (!b) return;
+  b.onclick = () => {
+    if (!b.dataset.ok) { b.dataset.ok = 1; b.textContent = "한 번 더 누르면 실제 보유내역이 바뀝니다"; return; }
+    S.holdings = S.simRes.H1.map(h => ({ t: h.t, shares: h.shares })); S.cash = Math.round(S.simRes.cash1);
+    LS.set("holdings", S.holdings); LS.set("cash", S.cash); S.sim = null; S.simRes = null;
+    computePort(); renderPort(); renderHome();
+    const pw = LS.get("pw", ""); if (S.token && pw) syncUp(pw).catch(() => { });
+    window.scrollTo(0, 0);
+  };
 }
 function recHtml() {
   const A = S.rec.actions; if (!A.length) return `<p class="desc">위험 측면에서 뚜렷하게 개선되는 변경안이 없습니다.</p>`;

@@ -570,6 +570,149 @@
     return { actions: out.slice(0, 4), pairs: P };
   };
 
+  // ───────────────────────── 한도 맞춤 재편안 · 재편 시뮬레이션 ─────────────────────────
+  // E.var 의 1년 부트스트랩과 같은 난수열·같은 창을 쓰되, 누적합으로 블록 합을 O(1)에 계산 (비중만 바꿔 수백 번 계산하기 위함)
+  E.fastVar = function (ctx, tickers, opt) {
+    opt = Object.assign({ years: 10, block: 21, paths: 10000, seed: 42, c: 0.95 }, opt || {});
+    const from = opt.from !== undefined ? opt.from : E.firstCommon(ctx, tickers);
+    const { idx, cols } = panel(ctx, tickers, "KRW", from), L = Math.min(idx.length, Math.round(252 * opt.years));
+    const ix = idx.slice(idx.length - L), B = opt.block, H = 252, nb = Math.ceil(H / B);
+    const rng = mulberry32(opt.seed), starts = new Int32Array(opt.paths * nb);
+    for (let k = 0; k < starts.length; k++) starts[k] = Math.floor(rng() * (L - B));
+    const lens = []; { let d = 0; for (let b = 0; b < nb; b++) { lens.push(Math.min(B, H - d)); d += B; } }
+    const P = new Float64Array(L + 1), loss = new Float64Array(opt.paths), xd = new Float64Array(L);
+    const f = function (w) {
+      const v = tickers.map(t => w[t] || 0); let exm = 0, rfm = 0;
+      for (let k = 0; k < L; k++) { const i = ix[k]; let r = 0; for (let j = 0; j < v.length; j++) if (v[j]) r += v[j] * cols[j][i]; xd[k] = r; exm += r - ctx.rf[i]; rfm += ctx.rf[i]; }
+      exm /= L; rfm /= L;
+      for (let k = 0; k < L; k++) P[k + 1] = P[k] + Math.log1p(xd[k] - ctx.rf[ix[k]] - exm + rfm);
+      for (let p = 0; p < opt.paths; p++) { let s = 0; for (let b = 0; b < nb; b++) { const st = starts[p * nb + b]; s += P[st + lens[b]] - P[st]; } loss[p] = 1 - Math.exp(s); }
+      return quantile(Float64Array.from(loss).sort(), opt.c);
+    };
+    f.years = +(L / 252).toFixed(1); f.from = from;
+    return f;
+  };
+  // 시장 균형 기대수익 (rf + β×ERP, 최근 5년 월간, 달러) — 수익 예측이 아니라 '위험에 걸맞은 보상' 기준
+  E.capmER = function (ctx, tickers, erp) {
+    const o = {};
+    for (const t of tickers) { if (t === CASH || isSafe(t)) { o[t] = null; continue; } try { o[t] = E.expected(E.monthly(ctx, [t], 5), "capm", erp).mu[0]; } catch (e) { o[t] = null; } }
+    let rf = 0; try { rf = E.expected(E.monthly(ctx, ["SPY"], 5), "capm", erp).rf; } catch (e) { }
+    for (const t in o) if (o[t] === null || !Number.isFinite(o[t])) o[t] = rf;
+    o._rf = rf; return o;
+  };
+  const sumBy = (o, f) => Object.keys(o).filter(f).reduce((a, t) => a + o[t], 0);
+  function bisect(g, lo, hi, it) { for (let k = 0; k < (it || 30); k++) { const m = (lo + hi) / 2; if (g(m)) hi = m; else lo = m; } return hi; } // g 가 참이 되는 최소값
+  // 비중 → 정수 주수 (SGOV 로 잔액 정리, 남는 돈은 원화 현금)
+  E.toShares = function (ctx, w1, nav, H0, cash0) {
+    const lp = ctx.market.last_px, fx = ctx.market.meta.fx_now, cur = {};
+    for (const h of H0) cur[h.t] = (cur[h.t] || 0) + h.shares;
+    const H1 = {}; let spent = 0;
+    for (const t in w1) { if (t === CASH || t === "SGOV" || !lp[t]) continue; const sh = Math.max(0, Math.round(w1[t] * nav / (lp[t] * fx))); if (sh > 0) H1[t] = sh; spent += sh * lp[t] * fx; }
+    for (const t in cur) if (!(t in w1) && t !== "SGOV" && !lp[t]) H1[t] = cur[t];
+    let rest = nav - spent - (w1[CASH] || 0) * nav;
+    if (lp.SGOV) { const sh = Math.max(0, Math.floor(rest / (lp.SGOV * fx))); if (sh > 0) H1.SGOV = sh; rest -= sh * lp.SGOV * fx; }
+    return { holdings: Object.entries(H1).map(([t, shares]) => ({ t, shares })), cash: Math.max(0, (w1[CASH] || 0) * nav + rest) };
+  };
+  E.tradeList = function (ctx, H0, H1) {
+    const lp = ctx.market.last_px, fx = ctx.market.meta.fx_now, a = {}, b = {};
+    for (const h of H0) a[h.t] = (a[h.t] || 0) + h.shares; for (const h of H1) b[h.t] = (b[h.t] || 0) + h.shares;
+    return [...new Set([...Object.keys(a), ...Object.keys(b)])].map(t => { const d = (b[t] || 0) - (a[t] || 0); return { t, from: a[t] || 0, to: b[t] || 0, d, amt: lp[t] ? d * lp[t] * fx : null }; })
+      .filter(x => Math.abs(x.d) > 1e-9).sort((x, y) => Math.abs(y.amt || 0) - Math.abs(x.amt || 0));
+  };
+  // 보유내역 두 개를 같은 창·같은 한도로 비교
+  E.compareHoldings = function (ctx, H0, cash0, H1, cash1, set) {
+    set = Object.assign({ erp: 0.045, limAmt: null }, set || {});
+    const W0 = E.weights(ctx, H0, cash0), W1 = E.weights(ctx, H1, cash1);
+    const tk = [...new Set([...Object.keys(W0.w), ...Object.keys(W1.w)])];
+    const from = E.firstCommon(ctx, tk), ER = E.capmER(ctx, tk, set.erp);
+    const one = W => {
+      if (!Object.keys(W.w).length) return null;
+      const V = E.var(ctx, W.w, W.nav, { from }), S = E.stress(ctx, W.w).filter(x => x.krw !== null).sort((a, b) => a.krw - b.krw)[0];
+      const C = E.contrib(ctx, W.w, 0.94), er = Object.keys(W.w).reduce((a, t) => a + W.w[t] * (t === CASH ? ER._rf : ER[t]), 0);
+      return { nav: W.nav, w: W.w, k: E.riskyShare(W.w), var1y: V.boot[252][0.95].amt, var1yPct: V.boot[252][0.95].pct, var1d99: V.boot[1][0.99].amt, var1m: V.boot[21][0.95].amt, es1y: V.boot[252][0.95].es_amt,
+        util: set.limAmt ? V.boot[252][0.95].amt / set.limAmt : null, volNow: V.sigma_ann, vol3y: C._vol ? C._vol.y3 : null, worst: S || null, er, years: V.years, missing: W.missing };
+    };
+    return { a: one(W0), b: one(W1), trades: E.tradeList(ctx, H0, H1), from: ctx.dates[from] };
+  };
+  // 한도(사용률 target)에 맞추는 재편안: ① 목표 비율 유지하며 위험자산 축소 ② 위험기여 큰 종목부터 축소 ③ 다른 ETF로 일부 교체
+  E.limitPlans = function (ctx, H0, cash0, limAmt, set) {
+    set = Object.assign({ target: 0.9, targets: null, erp: 0.045, nCand: 3 }, set || {});
+    const W = E.weights(ctx, H0, cash0), w = W.w, nav = W.nav, vStar = set.target * limAmt / nav;
+    const held = Object.keys(w), risky = held.filter(t => !isSafe(t)), k = E.riskyShare(w);
+    const base = [...new Set([...held.filter(t => t !== CASH), "SGOV"])];
+    const fv = E.fastVar(ctx, base), v0 = fv(w);
+    const out = { util0: v0 * nav / limAmt, var0: v0 * nav, target: set.target, years: fv.years, plans: [], need: v0 > vStar };
+    if (!(k > 0.01)) return out;
+    const SL = E.sleeveOf(set.targets), sleeve = (SL.sleeve && Object.keys(SL.sleeve).every(t => ctx.R[t])) ? SL.sleeve : Object.fromEntries(risky.map(t => [t, w[t] / k]));
+    const ER = E.capmER(ctx, [...new Set([...base, ...Object.keys(sleeve)])], set.erp);
+    const erOf = x => Object.keys(x).reduce((a, t) => a + x[t] * (t === CASH ? ER._rf : (ER[t] !== undefined ? ER[t] : ER._rf)), 0);
+    const safeBase = () => { const o = {}; for (const t of held) if (isSafe(t)) o[t] = w[t]; return o; };
+    const withRisky = (kk, sl) => { const o = safeBase(); const safeNow = sumBy(o, () => true); o.SGOV = (o.SGOV || 0) + (1 - kk - safeNow); for (const t in sl) o[t] = (o[t] || 0) + sl[t] * kk; return o; };
+    const plans = [];
+    const finish = (key, title, why, w1, extra) => {
+      const r = E.toShares(ctx, w1, nav, H0, cash0);
+      plans.push(Object.assign({ key, title, why, w1, holdings: r.holdings, cash: r.cash, trades: E.tradeList(ctx, H0, r.holdings), k1: E.riskyShare(w1), er0: erOf(w), er1: erOf(w1) }, extra || {}));
+    };
+    const fvS = Object.keys(sleeve).some(t => base.indexOf(t) < 0) ? E.fastVar(ctx, [...new Set([...base, ...Object.keys(sleeve)])]) : fv;
+    if (v0 > vStar) {
+      // ① 목표 비율 유지
+      const kk = Math.max(0, bisect(x => fvS(withRisky(x, sleeve)) > vStar, 0, k) - 1e-4); // 한도 안에 드는 최대 위험자산 비중
+      finish("keep", "목표 비율 그대로 위험자산만 줄이기", `위험자산 ${pct(k, 0)} → ${pct(kk, 0)}, 줄인 만큼 SGOV`, withRisky(kk, sleeve));
+      // ② 위험기여 큰 종목부터 (한계 VaR: 1%p 를 SGOV 로 옮겼을 때 VaR 감소폭)
+      let cur = Object.assign({}, w); const order = [], used = [];
+      for (let step = 0; step < risky.length && fv(cur) > vStar; step++) {
+        const base0 = fv(cur); let best = null, bd = 0;
+        for (const t of risky) { if (used.indexOf(t) >= 0 || !(cur[t] > 1e-4)) continue; const e = Math.min(0.01, cur[t]); const x = Object.assign({}, cur); x[t] -= e; x.SGOV = (x.SGOV || 0) + e; const dv = (base0 - fv(x)) / e; if (dv > bd) { bd = dv; best = t; } }
+        if (!best) break; used.push(best);
+        const mv = a => { const x = Object.assign({}, cur); x[best] -= a; x.SGOV = (x.SGOV || 0) + a; return x; };
+        const amt = fv(mv(cur[best])) > vStar ? cur[best] : bisect(a => fv(mv(a)) <= vStar, 0, cur[best]);
+        cur = mv(amt); order.push([best, amt]);
+      }
+      if (fv(cur) <= vStar * 1.001) finish("top", "위험기여 큰 종목 위주로 줄이기", order.map(([t, a]) => `${t} ${pct(a / w[t], 0)} 매도`).join(" → ") + " (VaR를 가장 많이 줄이는 순서)", cur);
+      // ③ 다른 ETF 일부 편입 + 나머지 초과분은 SGOV: 같은 한도에서 시장 균형 기대수익이 가장 높게 남는 조합
+      const mk = ctx.market, fr = mk.first_real || {};
+      const cands = [...new Set([...mk.groups.candidates, ...mk.groups.runners])].filter(t => ctx.R[t] && !(t in w) && !isSafe(t) && t !== "SPY"
+        && ((mk.proxy && mk.proxy[t]) || !fr[t] || (Date.parse(ctx.dates[ctx.n - 1]) - Date.parse(fr[t])) / 864e5 / 365.25 >= 5));
+      const ERc = E.capmER(ctx, cands, set.erp), rf = ER._rf, safeOther = sumBy(w, t => isSafe(t) && t !== "SGOV");
+      const erMix = (o, c) => Object.keys(o).reduce((s2, t) => s2 + o[t] * (t === c ? ERc[c] : t === CASH ? rf : (ER[t] !== undefined ? ER[t] : rf)), 0);
+      const mixOf = (c, a, kk) => { const o = withRisky(kk, sleeve); o[c] = a; o.SGOV = 1 - safeOther - kk - a; return o; };
+      // 1차: 지금 포트에서 위험자산 5%p를 후보로 옮길 때 VaR 감소 대비 기대수익 손실이 적은 후보만 추림
+      const pre = [];
+      for (const c of cands) {
+        const f = E.fastVar(ctx, [...new Set([...base, ...Object.keys(sleeve), c])], { paths: 3000 });
+        if (f.years < 5) continue;
+        const a = Math.min(0.05, k), x0 = withRisky(k, sleeve), x1 = mixOf(c, a, k - a), xs = withRisky(k - a, sleeve);
+        const dvC = f(x0) - f(x1), dvS = f(x0) - f(xs); if (!(dvC > 0)) continue;
+        pre.push({ c, f, score: (ERc[c] - rf) / Math.max(1e-6, 1 - dvC / dvS), dvC, dvS });
+      }
+      pre.sort((x, y) => y.score - x.score);
+      const res = [];
+      for (const { c } of pre.slice(0, 8)) {
+        const f = E.fastVar(ctx, [...new Set([...base, ...Object.keys(sleeve), c])]);
+        let best = null;
+        for (const a of [0.1, 0.2, 0.3]) {
+          if (a > 1 - safeOther) continue;
+          const cap = Math.min(k, 1 - safeOther - a);
+          if (f(mixOf(c, a, 0)) > vStar) continue;
+          const kk = Math.max(0, bisect(x => f(mixOf(c, a, x)) > vStar, 0, cap, 16) - 1e-4);
+          const o = mixOf(c, a, kk), er = erMix(o, c);
+          if (!best || er > best.er) best = { c, a, kk, w1: o, er };
+        }
+        if (best) res.push(best);
+      }
+      res.sort((x, y) => y.er - x.er);
+      const keepER = plans[0] ? plans[0].er1 : -1;
+      for (const r of res.filter(r => r.er > keepER + 0.002).slice(0, set.nCand)) {
+        finish("swap:" + r.c, `${r.c} ${pct(r.a, 0)} 새로 편입`, `${r.c}(${(mk.names && mk.names[r.c]) || ""}) ${pct(r.a, 0)} 편입, 위험자산 ${pct(k, 0)} → ${pct(r.kk, 0)} — ①보다 위험자산을 덜 줄여도 한도 안`, r.w1, { cand: r.c });
+        plans[plans.length - 1].er1 = r.er;
+      }
+    }
+    // 정수 주수로 만든 결과를 실제 VaR 로 다시 계산
+    for (const p of plans) { const c = E.compareHoldings(ctx, H0, cash0, p.holdings, p.cash, { limAmt, erp: set.erp }); p.check = c.b; }
+    out.plans = plans;
+    return out;
+  };
+
   // ───────────────────────── 리밸런싱 규칙 시뮬레이션 ─────────────────────────
   // rule = { mode: "none"|"calendar"|"band"|"both", freq: "M"|"Q"|"S"|"A", abs: 0.05, rel: 0.25 }
   //  calendar: 주기 말마다 무조건 목표로 / band: 허용범위를 벗어나는 날 즉시 / both: 주기 말에 확인해서 벗어났을 때만
