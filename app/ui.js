@@ -12,7 +12,7 @@ const LS = {
   set(k, v) { try { localStorage.setItem("pr." + k, JSON.stringify(v)); } catch (e) { } },
   del(k) { try { localStorage.removeItem("pr." + k); } catch (e) { } },
 };
-const DEF = { limit: { amount: 2e7, h: 252, c: 0.95, warn: 0.8, mode: "pct", pct: 0.2 }, varMethod: "boot", erp: null, targets: null,
+const DEF = { limit: { amount: 2e7, h: 252, c: 0.95, warn: 0.8, mode: "pct", pct: 0.2 }, varMethod: "boot", erp: null, rfKRW: 0.025, targets: null,
   fr: { method: "shrink", years: 5, maxW: 1, extra: [] }, repo: "", ddWarn: [0.10, 0.20], moveTh: 0.03,
   rule: { mode: "band", freq: "Q", abs: 0.05, rel: 0.25, basis: "sleeve" } };
 const S = {
@@ -120,6 +120,7 @@ function wkStart() {
   } catch (e) { WK = null; }
 }
 function job(kind, a) {
+  a = Object.assign({ rfKRW: S.set.rfKRW ?? 0.025 }, a);
   const local = () => new Promise((res, rej) => setTimeout(() => { try { res(E.runJob(S.ctx, kind, a)); } catch (e) { rej(e); } }, 30));
   if (!WK) return local();
   return new Promise((res, rej) => { const id = ++WKid; WKp[id] = { res, rej, fallback: () => local().then(res, rej) }; WK.postMessage({ id, kind, a }); });
@@ -675,11 +676,11 @@ function renderFr() {
 }
 function drawFr(tk) {
   const f = S.set.fr, seq = S.frSeq = (S.frSeq || 0) + 1;
-  const hasP = S.port && !S.port.empty && S.port.W && !Object.keys(S.port.W.w).some(t => frOff().includes(t === E.CASH ? "SGOV" : t));
-  const map = w => { const o = {}; for (const k in w) { const t = k === E.CASH ? "SGOV" : k; o[t] = (o[t] || 0) + w[k]; } return o; };
+  const hasP = S.port && !S.port.empty && S.port.W && !Object.keys(S.port.W.w).some(t => t !== E.CASH && frOff().includes(t));
+  const map = w => Object.assign({}, w);
   const curW = hasP ? map(S.port.W.w) : null;
   const acts = hasP && S.rec && S.rec.actions && S.overlay !== null ? S.rec.actions : [];
-  const recW = acts.map(a => Object.keys(a.w1).every(t => tk.includes(t === E.CASH ? "SGOV" : t)) ? map(a.w1) : null);
+  const recW = acts.map(a => Object.keys(a.w1).every(t => t === E.CASH || tk.includes(t)) ? map(a.w1) : null);
   const c = $("#cFr"); if (c && !c.dataset.drawn) c.innerHTML = spin("투자선 계산 중…");
   busyOn("fr", "투자선 계산 중…");
   job("frontier", { tk, allTk: frAll(), years: f.years, method: f.method, erp: S.set.erp, maxW: f.maxW, curW, recW })
@@ -691,7 +692,7 @@ function paintFr(tk, R, acts, recW) {
   const f = S.set.fr;
   if (R.short) { $("#frNote").textContent = "공통 데이터가 2년 미만이라 그릴 수 없습니다. 이력이 짧은 자산을 빼보세요."; return; }
   const P = R.pts, cur = R.cur;
-  $("#frNote").textContent = `월간 수익률 ${R.n}개월(${R.from}~${R.to}), 달러 기준 · 공분산 Ledoit-Wolf 축소 ${num(R.shrink)} · 무위험 ${pct(R.rf, 2)}` +
+  $("#frNote").textContent = `월간 수익률 ${R.n}개월(${R.from}~${R.to}), 원화 기준(달러 수익 × 환율 변화) · 공분산 Ledoit-Wolf 축소 ${num(R.shrink)} · 원화 무위험 ${pct(R.rf, 1)}(설정)` +
     (f.method === "shrink" ? ` · 평균을 ${pct(R.phi, 0)} 축소` : f.method === "capm" ? ` · 위험프리미엄 ${pct(S.set.erp, 1)} × 베타` : " · 과거 평균 그대로(최근 많이 오른 자산에 쏠림)");
   if (S.frIdx === null || S.frIdx >= P.length) { const v0 = cur ? cur.vol : R.maxSharpe.vol; let bi = 0; P.forEach((p, i) => { if (Math.abs(p.vol - v0) < Math.abs(P[bi].vol - v0)) bi = i; }); S.frIdx = bi; }
   const sl = $("#frSl"); sl.max = P.length - 1; sl.value = S.frIdx;
@@ -701,6 +702,7 @@ function paintFr(tk, R, acts, recW) {
     assetTr,
     { x: [R.maxSharpe.vol], y: [R.maxSharpe.ret], mode: "markers", name: "최대 샤프", marker: { symbol: "diamond", size: 11, color: css("--s3"), line: { color: css("--card"), width: 2 } }, hovertemplate: "최대 샤프<br>%{x:.1%}, %{y:.1%}<extra></extra>" },
   ];
+  traces.push({ x: [0], y: [R.rf], mode: "markers+text", text: ["원화 현금"], textposition: "middle right", textfont: { size: 10.5, color: css("--ink2") }, name: "원화 현금", marker: { symbol: "circle-open", size: 9, color: css("--ink2") }, hovertemplate: "원화 현금<br>변동성 0%<br>수익 %{y:.1%}<extra></extra>" });
   // 벤치마크: S&P500 은 자산 목록과 상관없이 항상 같은 가정·같은 기간으로 표시
   if (R.spy) traces.push({ x: [R.spy.vol], y: [R.spy.ret], mode: "markers+text", text: ["S&P500"], textposition: "bottom center", textfont: { size: 11, color: css("--ink") }, name: "S&P500(벤치마크)", marker: { symbol: "square", size: 11, color: css("--ink"), line: { color: css("--card"), width: 1.5 } }, hovertemplate: "S&P500 (벤치마크)<br>변동성 %{x:.1%}<br>기대수익 %{y:.1%}<extra></extra>" });
   const ann = [];
@@ -739,13 +741,23 @@ function paintFr(tk, R, acts, recW) {
   }
   const fine = (xr[1] - xr[0]) < 0.12;
   // 가까이 붙은 자산 이름이 겹치지 않게 위/아래/오른쪽/왼쪽으로 번갈아 배치 (S&P500 이름 자리도 피함)
-  const placed = R.spy ? [[R.spy.vol, R.spy.ret, "bottom center"]] : [], W_ = xr[1] - xr[0], H_ = yr[1] - yr[0];
-  assetTr.textposition = tk.map((t, i) => {
-    const x = R.sd[i], y = R.mu[i], edge = x - xr[0] < W_ * 0.08;
-    const POS = edge ? ["top right", "bottom right", "middle right"] : ["top center", "bottom center", "middle right", "middle left", "top right", "bottom left"];
-    const near = placed.filter(([px, py]) => Math.abs(px - x) < W_ * 0.12 && Math.abs(py - y) < H_ * 0.07).map(q => q[2]);
-    const pos = POS.find(q => !near.includes(q)) || POS[0]; placed.push([x, y, pos]); return pos;
-  });
+  // 이름 겹침 방지: 가까운 점(다른 자산·S&P500·최대 샤프·현재 포트)이 있으면 그 반대쪽에 이름을 둠
+  const W_ = xr[1] - xr[0], H_ = yr[1] - yr[0];
+  const obst = [[R.maxSharpe.vol, R.maxSharpe.ret], ...(cur ? [[cur.vol, cur.ret]] : [])];
+  const away = (x, y, others) => {
+    const edge = x - xr[0] < W_ * 0.08;
+    const C = [["top center", 0, 1], ["bottom center", 0, -1], ["middle right", 1, 0], ["middle left", -1, 0], ["top right", 0.7, 0.7], ["bottom right", 0.7, -0.7]].filter(c => !(edge && (c[0] === "middle left" || c[0].endsWith("center"))));
+    let best = C[0][0], bs = Infinity;
+    for (const [pos, ux, uy] of C) {
+      let sc = 0;
+      for (const [px, py] of others) { const dx = (px - x) / W_, dy = (py - y) / H_ * 1.7, d = Math.hypot(dx, dy); if (d < 1e-9 || d > 0.2) continue; const cos = (dx * ux + dy * uy) / d / Math.hypot(ux, uy); if (cos > 0) sc += cos / d; }
+      if (sc < bs - 1e-9) { bs = sc; best = pos; }
+    }
+    return best;
+  };
+  const allPts = tk.map((t, i) => [R.sd[i], R.mu[i]]).concat(R.spy ? [[R.spy.vol, R.spy.ret]] : []).concat(obst);
+  assetTr.textposition = tk.map((t, i) => away(R.sd[i], R.mu[i], allPts));
+  const spyTr = traces.find(t => t.name === "S&P500(벤치마크)"); if (spyTr) spyTr.textposition = [away(R.spy.vol, R.spy.ret, allPts)];
   const sp0 = $("#cFr .empty"); if (sp0) sp0.remove();
   const zoomedOut = R.spy && cur && S.frZoom && (R.spy.vol < xr[0] || R.spy.vol > xr[1] || R.spy.ret < yr[0] || R.spy.ret > yr[1]);
   plot("cFr", traces, { xaxis: AX({ tickformat: fine ? ".1%" : ".0%", title: { text: "연 변동성", font: { size: 11 } }, range: xr }), yaxis: AX({ tickformat: (yr[1] - yr[0]) < 0.06 ? ".1%" : ".0%", title: { text: "기대수익(연)", font: { size: 11 } }, range: yr }), annotations: ann, shapes: [vline(sel.vol)] });
@@ -805,7 +817,7 @@ async function runNow() {
   } catch (e) { msg.textContent = String(e.message || e); }
 }
 async function syncUp(pw) {
-  const box = await E.encrypt({ holdings: S.holdings, cash: S.cash, settings: { limit: S.set.limit, targets: S.set.targets, ddWarn: S.set.ddWarn, moveTh: S.set.moveTh, erp: S.set.erp, rule: S.set.rule }, saved: new Date().toISOString() }, pw);
+  const box = await E.encrypt({ holdings: S.holdings, cash: S.cash, settings: { limit: S.set.limit, targets: S.set.targets, ddWarn: S.set.ddWarn, moveTh: S.set.moveTh, erp: S.set.erp, rfKRW: S.set.rfKRW, rule: S.set.rule }, saved: new Date().toISOString() }, pw);
   let sha; try { sha = (await gh("/contents/portfolio.enc.json")).sha; } catch (e) { }
   const content = btoa(unescape(encodeURIComponent(JSON.stringify(box))));
   await gh("/contents/portfolio.enc.json", { method: "PUT", body: JSON.stringify({ message: "update encrypted portfolio", content, sha }) });
@@ -833,6 +845,7 @@ function renderSet() {
     <h3>리밸런싱 목표비중</h3><p class="desc">${S.set.targets ? Object.entries(S.set.targets).map(([t, v]) => `${t} ${pct(v, 0)}`).join(", ") + ` · 위험자산 기본 비중 ${pct(E.riskyShare(S.set.targets), 0)}` : "설정 안 됨"} · 허용범위·주기는 아래 '리밸런싱 규칙'에서</p>
     <div class="row"><button class="btn" id="tgSet">현재 비중을 목표로 저장</button><button class="btn" id="tgClr">목표 해제</button></div>
     <h3>시장 균형 가정</h3><div class="row"><label class="small" style="width:100px">주식 위험프리미엄</label><input type="number" step="0.1" id="erp" value="${(S.set.erp * 100).toFixed(1)}" style="width:80px">%</div>
+    <div class="row" style="margin-top:6px"><label class="small" style="width:100px">원화 무위험금리</label><input type="number" step="0.1" id="rfk" value="${((S.set.rfKRW ?? 0.025) * 100).toFixed(1)}" style="width:80px"><span>%</span><span class="note">CMA·파킹통장 금리. 투자선·샤프·균형 기대수익의 기준</span></div>
     <div class="row" style="margin-top:10px"><button class="btn primary" id="setSave">저장</button><span class="note" id="setMsg"></span></div></div>
   <div class="card"><h2>리밸런싱 규칙 ${ib("리밸런싱")}</h2>
     <div class="row"><label class="small" style="width:100px">방식</label><select id="rbMode" style="flex:1">${Object.entries(E.RULES).map(([k, l]) => `<option value="${k}" ${k === S.set.rule.mode ? "selected" : ""}>${l}</option>`).join("")}</select></div>
@@ -865,7 +878,7 @@ function renderSet() {
   $("#limP").oninput = () => { const q = portReady() && S.port.diag.qStart; const n = $("#limPNote"); if (q && n) n.textContent = `지금 기준 ${won(q.value * (+$("#limP").value / 100))} (분기초 ${won(q.value)})`; };
   $("#setSave").onclick = () => {
     S.set.limit = { mode: $("#limM").value, pct: +$("#limP").value / 100, amount: +$("#limA").value, h: +$("#limH").value, c: +$("#limC").value, warn: +$("#limW").value / 100, qSnap: S.set.limit.qSnap };
-    S.set.erp = +$("#erp").value / 100; S.set.repo = $("#repo").value.trim(); saveSet(); computePort(); autoSync("#setMsg", "저장됨"); renderHdr();
+    S.set.erp = +$("#erp").value / 100; S.set.rfKRW = +$("#rfk").value / 100; S.set.repo = $("#repo").value.trim(); saveSet(); computePort(); autoSync("#setMsg", "저장됨"); renderHdr();
   };
   $("#rbSave").onclick = () => { S.set.rule = { mode: $("#rbMode").value, freq: $("#rbFreq").value, abs: +$("#rbAbs").value / 100, rel: +$("#rbRel").value / 100, basis: $("#rbBasis").value }; saveSet(); computePort(); autoSync("#rbMsg", "저장됨 · 알림과 비교표에 반영"); };
   $("#presetB").onclick = () => {

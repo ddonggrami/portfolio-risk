@@ -11,7 +11,7 @@ const V = E.var(ctx, w, 1e8, {});
 const C = E.contrib(ctx, w, 0.94);
 const S = E.stress(ctx, w);
 const tk = ["SPMO", "GLD", "SOXX", "BRK-B", "SGOV", "XLE"];
-const M = E.monthly(ctx, tk, 5);
+const M = E.monthly(ctx, tk, 5, "USD"); // 파이썬 기준 구현과 비교하는 달러 경로
 const ex = E.expected(M, "hist", 0.045);
 const fr = E.frontier(ex.mu, ex.S, { maxW: 1, rf: ex.rf });
 const exs = E.expected(M, "shrink", 0.045), exc = E.expected(M, "capm", 0.045);

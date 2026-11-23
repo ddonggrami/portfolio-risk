@@ -328,22 +328,26 @@
   };
 
   // ───────────────────────── 월간 데이터 · 기대수익 · 투자선 ─────────────────────────
-  E.monthly = function (ctx, tickers, years) {
+  // 월간 수익률. 기본은 원화 기준(달러 수익 × 환율 변화) — VaR·한도와 같은 통화.
+  // 원화 무위험금리는 시계열이 없어 설정값(ctx.rfKRW, 기본 연 2.5%)을 씀
+  E.monthly = function (ctx, tickers, years, base) {
+    base = base || "KRW";
     const d = ctx.dates, ends = [];
     for (let i = 1; i < ctx.n; i++) if (i === ctx.n - 1 || d[i].slice(0, 7) !== d[i + 1].slice(0, 7)) ends.push(i);
     // 마지막 달이 미완(거래일 15일 미만)이면 제외
     const lastM = d[ctx.n - 1].slice(0, 7); let cnt = 0; for (let i = ctx.n - 1; i >= 0 && d[i].slice(0, 7) === lastM; i--) cnt++;
     if (cnt < 15) ends.pop();
     const use = ends.slice(-(years * 12 + 1));
-    const cols = [...tickers, "SPY"].map(t => series(ctx, t, "USD"));
+    const cols = [...tickers, "SPY"].map(t => series(ctx, t, base));
+    const rfkD = Math.pow(1 + (ctx.rfKRW !== undefined ? ctx.rfKRW : 0.025), 1 / 252) - 1;
     const rows = [], rfm = [], spy = [], labels = [];
     for (let k = 1; k < use.length; k++) {
       const a = use[k - 1] + 1, b = use[k]; const g = new Float64Array(cols.length).fill(1); let rg = 1, ok = true;
-      for (let i = a; i <= b; i++) { rg *= 1 + ctx.rf[i]; for (let j = 0; j < cols.length; j++) { const x = cols[j][i]; if (!Number.isFinite(x)) ok = false; g[j] *= 1 + x; } }
+      for (let i = a; i <= b; i++) { rg *= 1 + (base === "KRW" ? rfkD : ctx.rf[i]); for (let j = 0; j < cols.length; j++) { const x = cols[j][i]; if (!Number.isFinite(x)) ok = false; g[j] *= 1 + x; } }
       if (!ok) continue;
       rows.push(Array.from(g.slice(0, tickers.length), x => x - 1)); spy.push(g[tickers.length] - 1); rfm.push(rg - 1); labels.push(d[b].slice(0, 7));
     }
-    return { rows, rfm, spy, labels, tickers };
+    return { rows, rfm, spy, labels, tickers, base };
   };
 
   E.expected = function (M, method, erp) {
@@ -402,15 +406,16 @@
     const P = fr.pts; if (vol <= P[0].vol) return P[0].ret; if (vol >= P[P.length - 1].vol) return P[P.length - 1].ret;
     for (let i = 1; i < P.length; i++) if (P[i].vol >= vol) { const a = P[i - 1], b = P[i]; return a.ret + (b.ret - a.ret) * (vol - a.vol) / (b.vol - a.vol); }
   };
-  E.point = function (ex, tickers, w) { const v = tickers.map(t => w[t] || 0); return { vol: Math.sqrt(quad(ex.S, v)), ret: dot(ex.mu, v), v }; };
+  // 원화 현금은 변동성 0, 수익 = 원화 무위험금리 (원화 기준에선 SGOV 와 다른 자산)
+  E.point = function (ex, tickers, w) { const v = tickers.map(t => w[t] || 0); return { vol: Math.sqrt(quad(ex.S, v)), ret: dot(ex.mu, v) + (w[CASH] || 0) * ex.rf, v, cash: w[CASH] || 0 }; };
   E.METHODS = [["hist", "과거 평균"], ["shrink", "축소 추정"], ["capm", "시장 균형"]];
 
   // ───────────────────────── 진단 · 추천 ─────────────────────────
   function frontierTickers(w, extra) {
-    const s = new Set(Object.keys(w).filter(t => w[t] > 1e-9).map(t => t === CASH ? "SGOV" : t));
+    const s = new Set(Object.keys(w).filter(t => w[t] > 1e-9 && t !== CASH));
     s.add("SGOV"); (extra || []).forEach(t => s.add(t)); return [...s];
   }
-  function mapCash(w) { const o = {}; for (const k in w) { const t = k === CASH ? "SGOV" : k; o[t] = (o[t] || 0) + w[k]; } return o; }
+  function mapCash(w) { return Object.assign({}, w); }
   E.efficiency = function (ctx, w, opt) {
     opt = Object.assign({ years: 5, erp: 0.045, maxW: 1, extra: [] }, opt || {});
     const tk = frontierTickers(w, opt.extra), M = E.monthly(ctx, tk, opt.years), wm = mapCash(w);
@@ -630,7 +635,7 @@
   // 시장 균형 기대수익 (rf + β×ERP, 최근 5년 월간, 달러) — 수익 예측이 아니라 '위험에 걸맞은 보상' 기준
   E.capmER = function (ctx, tickers, erp) {
     const o = {};
-    for (const t of tickers) { if (t === CASH || isSafe(t)) { o[t] = null; continue; } try { o[t] = E.expected(E.monthly(ctx, [t], 5), "capm", erp).mu[0]; } catch (e) { o[t] = null; } }
+    for (const t of tickers) { if (t === CASH) { o[t] = null; continue; } try { o[t] = E.expected(E.monthly(ctx, [t], 5), "capm", erp).mu[0]; } catch (e) { o[t] = null; } }
     let rf = 0; try { rf = E.expected(E.monthly(ctx, ["SPY"], 5), "capm", erp).rf; } catch (e) { }
     for (const t in o) if (o[t] === null || !Number.isFinite(o[t])) o[t] = rf;
     o._rf = rf; return o;
@@ -909,6 +914,7 @@
 
   // ───────────────────────── 백그라운드 작업 (Web Worker 와 화면 쪽 대체 실행이 같이 씀) ─────────────────────────
   E.runJob = function (ctx, kind, a) {
+    if (a && a.rfKRW !== undefined) ctx.rfKRW = a.rfKRW;
     if (kind === "analyze") {
       const W = E.weights(ctx, a.H, a.cash);
       if (!Object.keys(W.w).length) return { W, empty: true };

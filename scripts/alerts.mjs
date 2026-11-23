@@ -83,6 +83,7 @@ let fresh = [], gone = [], cur = {}, diag = null, W = null, set = null;
 if (pf && pf.holdings && pf.holdings.length) {
   status.portfolio = true;
   const st = pf.settings || {};
+  ctx.rfKRW = st.rfKRW ?? 0.025; // 원화 무위험금리 (투자선·샤프·균형 기대수익 기준)
   W = E.weights(ctx, pf.holdings, pf.cash || 0);
   set = { lam: market.defaults.ewma_lambda, limit: Object.assign({ amount: 2e7, h: 252, c: 0.95, warn: 0.8, mode: "pct", pct: 0.2 }, st.limit || {}), targets: st.targets || null, erp: st.erp || market.defaults.erp, dupTh: market.defaults.signals.dup_corr || 0.9 };
   diag = E.diagnose(ctx, W.w, W.nav, set);
