@@ -108,6 +108,42 @@ function showInfo(key) {
 document.addEventListener("click", e => { const b = e.target.closest("[data-info]"); if (b) { e.stopPropagation(); showInfo(b.dataset.info); } else if (e.target.id === "sheet") $("#sheet").classList.remove("on"); }, true);
 const tag = t => `<span class="pill">${esc(t)}</span>${ib(t)}`;
 
+// ───────── 백그라운드 계산 (Web Worker) ─────────
+// 무거운 계산을 화면과 분리해서, 계산 중에도 터치·입력이 바로 되게 한다. Worker 를 못 쓰면 화면 쪽에서 계산.
+let WK = null, WKid = 0; const WKp = {};
+function wkStart() {
+  try {
+    WK = new Worker("worker.js");
+    WK.onmessage = e => { const p = WKp[e.data.id]; if (!p) return; delete WKp[e.data.id]; e.data.ok ? p.res(e.data.r) : p.rej(new Error(e.data.err)); };
+    WK.onerror = () => { WK = null; for (const id in WKp) { const p = WKp[id]; delete WKp[id]; p.fallback(); } };
+  } catch (e) { WK = null; }
+}
+function job(kind, a) {
+  const local = () => new Promise((res, rej) => setTimeout(() => { try { res(E.runJob(S.ctx, kind, a)); } catch (e) { rej(e); } }, 30));
+  if (!WK) return local();
+  return new Promise((res, rej) => { const id = ++WKid; WKp[id] = { res, rej, fallback: () => local().then(res, rej) }; WK.postMessage({ id, kind, a }); });
+}
+// 진행 표시: 화면 아래쪽에 "○○ 중… 잠시만 기다려 주세요"
+const BUSY = new Map();
+function busyOn(key, msg) { BUSY.set(key, msg); busyShow(); }
+function busyOff(key) { BUSY.delete(key); busyShow(); }
+function busyShow() {
+  const b = $("#busy"); if (!b) return;
+  if (!BUSY.size) { b.classList.remove("on"); return; }
+  $("#busyMsg").textContent = [...BUSY.values()].pop(); b.classList.add("on");
+}
+// 입력 중에는 화면을 다시 그리지 않음 (입력한 값·커서가 사라지지 않게). 입력을 마치면 그때 반영
+function editingIn(sel) { const a = document.activeElement, box = $(sel); return !!(a && box && box.contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)); }
+function refreshPort() {
+  if (S.view !== "port") return;
+  if (!editingIn("#v-port")) { renderPort(); return; }
+  if (S.portDeferred) return; S.portDeferred = true;
+  const box = $("#v-port");
+  const h = () => setTimeout(() => { if (editingIn("#v-port")) return; box.removeEventListener("focusout", h); S.portDeferred = false; renderPort(); }, 60);
+  box.addEventListener("focusout", h);
+}
+const portReady = () => !!(S.port && !S.port.empty && !S.port.pending && S.port.diag);
+
 // ───────── 데이터 적재 ─────────
 async function getJSON(u) { const r = await fetch(u + (u.includes("?") ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" }); if (!r.ok) throw new Error(u + " " + r.status); return r.json(); }
 async function loadData() {
@@ -117,6 +153,7 @@ async function loadData() {
     S.returns = await getJSON("returns.json");
     LS.set("returns_date", S.market.meta.price_date);
     S.ctx = E.load(S.market, S.returns);
+    if (!WK) wkStart(); if (WK) WK.postMessage({ id: 0, kind: "init", a: { market: S.market, returns: S.returns } });
     try { S.status = await getJSON("status.json"); } catch (e) { S.status = null; }
     if (S.set.erp === null) S.set.erp = S.market.defaults.erp;
     S.loadError = null;
@@ -147,30 +184,42 @@ function health() {
 
 // ───────── 포트폴리오 계산 ─────────
 function computePort() {
-  S.port = null;
-  if (!S.ctx || !S.holdings.length) return;
-  const H = S.holdings.filter(h => h.t && h.shares > 0);
-  const W = E.weights(S.ctx, H, +S.cash || 0);
-  if (!Object.keys(W.w).length) { S.port = { W, empty: true }; return; }
+  const seq = S.portSeq = (S.portSeq || 0) + 1;
+  S.rec = null; S.plans = null; S.simRes = null;
+  if (!S.ctx || !S.holdings.length) { S.port = null; return Promise.resolve(); }
+  const H = S.holdings.filter(h => h.t && h.shares > 0), cash = +S.cash || 0;
+  const W = E.weights(S.ctx, H, cash);
+  if (!Object.keys(W.w).length) { S.port = { W, empty: true }; return Promise.resolve(); }
   const set = { lam: S.market.defaults.ewma_lambda, limit: S.set.limit, targets: S.set.targets, erp: S.set.erp, dupTh: S.market.defaults.signals.dup_corr || 0.9 };
-  const diag = E.diagnose(S.ctx, W.w, W.nav, set);
-  const alerts = E.alerts(S.ctx, W.w, W.nav, diag, { limit: S.set.limit, targets: S.set.targets, ddWarn: S.set.ddWarn, moveTh: S.set.moveTh, dupTh: set.dupTh, rule: S.set.rule });
-  S.port = { W, diag, alerts, set };
-  S.rec = null;
-  S.plans = null; S.simRes = null;
-  later(() => {
-    S.rec = E.recommend(S.ctx, W.w, W.nav, diag, set);
-    if (diag.util > 1) calcPlans(S.planTarget || 0.9, true);
-    if (S.view === "port") renderPort(); if (S.view === "home") renderHome(); if (S.view === "fr") renderFr();
+  const alertSet = { limit: S.set.limit, targets: S.set.targets, ddWarn: S.set.ddWarn, moveTh: S.set.moveTh, dupTh: set.dupTh, rule: S.set.rule };
+  S.port = { W, pending: true, set };
+  busyOn("port", "보유내역 분석 중… 잠시만 기다려 주세요");
+  refreshPort(); if (S.view === "home") renderHome();
+  return job("analyze", { H, cash, set, alertSet }).then(r => {
+    if (seq !== S.portSeq) return;
+    S.port = r.empty ? { W: r.W, empty: true } : { W: r.W, diag: r.diag, alerts: r.alerts, set };
+    busyOff("port"); refreshPort(); if (S.view === "home") renderHome();
+    if (r.empty) return;
+    busyOn("rec", "추천·재편안 계산 중… 화면은 계속 쓰셔도 됩니다");
+    const jobs = [job("recommend", { w: r.W.w, nav: r.W.nav, diag: r.diag, set }).then(x => {
+      if (seq !== S.portSeq) return; S.rec = x; refreshPort(); if (S.view === "home") renderHome(); if (S.view === "fr") renderFr();
+    })];
+    if (r.diag.util > 1) jobs.push(calcPlans(S.planTarget || 0.9, true, seq));
+    return Promise.all(jobs).catch(e => { S.jobErr = String(e.message || e); }).finally(() => busyOff("rec"));
+  }).catch(e => {
+    if (seq !== S.portSeq) return;
+    busyOff("port"); S.port = { W, error: String(e.message || e) }; refreshPort();
   });
 }
 
 function curHoldings() { return S.holdings.filter(h => h.t && h.shares > 0); }
-function calcPlans(target, quiet) {
-  const P = S.port; if (!P || P.empty) return;
-  S.planTarget = target;
-  S.plans = E.limitPlans(S.ctx, curHoldings(), +S.cash || 0, P.diag.limAmt, { target, targets: S.set.targets, erp: P.set.erp || S.market.defaults.erp, h: E.limHC(S.set.limit).h, c: E.limHC(S.set.limit).c });
-  if (!quiet && S.view === "port") renderPort();
+function calcPlans(target, quiet, seq) {
+  const P = S.port; if (!portReady()) return Promise.resolve();
+  S.planTarget = target; seq = seq || S.portSeq;
+  if (!quiet) busyOn("plans", "재편안 계산 중… 잠시만 기다려 주세요");
+  return job("plans", { H: curHoldings(), cash: +S.cash || 0, limAmt: P.diag.limAmt, opt: { target, targets: S.set.targets, erp: P.set.erp || S.market.defaults.erp, h: E.limHC(S.set.limit).h, c: E.limHC(S.set.limit).c } })
+    .then(r => { if (seq !== S.portSeq) return; S.plans = r; refreshPort(); })
+    .finally(() => busyOff("plans"));
 }
 
 // ───────── 헤더 ─────────
@@ -203,7 +252,8 @@ function renderHome() {
     <div class="row" style="margin-top:10px"><button class="btn primary" id="runNow">지금 점검</button><span class="note" id="runMsg">${S.token ? "누르면 3~5분 뒤 새 결과가 반영됩니다" : "설정에서 GitHub 토큰을 넣으면 쓸 수 있습니다"}</span></div>
     ${m.failed && m.failed.length ? `<p class="note">가격 수집 실패: ${m.failed.join(", ")}</p>` : ""}
     ${notifyLine()}</div>`;
-  if (S.port && !S.port.empty) {
+  if (S.port && S.port.pending) html += `<div class="card"><h2>내 포트폴리오 진단</h2><p class="desc">${spin("분석 중… 잠시만 기다려 주세요")}</p></div>`;
+  else if (portReady()) {
     const d = S.port.diag, vl = { "양호": "ok", "보통": "warning", "점검 필요": "critical" }[d.verdict];
     html += `<div class="card"><div class="spread"><h2>내 포트폴리오 진단</h2>${badge(vl, d.verdict)}</div>
       <p class="desc">총 ${won(S.port.W.nav)} · 위험 쪽 5개 항목 종합</p>
@@ -231,19 +281,21 @@ function renderHome() {
 // ═════════ 내 포트 ═════════
 function holdingsEditor() {
   const opts = E.tickers(S.ctx).sort().map(t => `<option value="${t}">${esc(S.market.names[t] || "")}</option>`).join("");
-  const rows = (S.holdings.length ? S.holdings : [{ t: "", shares: "" }]).map((h, i) =>
+  const src = S.hDraft || S.holdings;
+  const rows = (src.length ? src : [{ t: "", shares: "" }]).map((h, i) =>
     `<div class="hold-row"><input list="tk" placeholder="티커 (예: SPMO)" value="${esc(h.t)}" data-k="t" data-i="${i}" autocapitalize="characters"><input type="number" inputmode="decimal" placeholder="주수" value="${h.shares}" data-k="shares" data-i="${i}"><button class="btn" data-del="${i}">삭제</button></div>`).join("");
   return `<div class="card"><h2>보유내역</h2><p class="desc">ETF·종목과 보유 주수. 이 휴대폰에만 저장되며, 텔레그램 알림을 원하면 설정에서 암호화 동기화를 켜세요.</p>
     <datalist id="tk">${opts}</datalist><div id="hrows">${rows}</div>
     <div class="row"><button class="btn" id="addRow">+ 종목 추가</button></div>
-    <div class="row" style="margin-top:8px"><label class="small">원화 현금</label><input type="number" inputmode="numeric" id="cash" value="${S.cash || ""}" placeholder="0" style="flex:1"></div>
-    <div class="row" style="margin-top:10px"><button class="btn primary" id="saveH">저장하고 분석</button><span class="note" id="hmsg"></span></div></div>`;
+    <div class="row" style="margin-top:8px"><label class="small">원화 현금</label><input type="number" inputmode="numeric" id="cash" value="${S.cashDraft !== undefined ? S.cashDraft : (S.cash || "")}" placeholder="0" style="flex:1"></div>
+    ${S.hDraft ? `<p class="note" style="color:var(--warn,#b7791f)">저장하지 않은 변경이 있습니다 — '저장하고 분석'을 눌러야 반영됩니다.</p>` : ""}
+    <div class="row" style="margin-top:10px"><button class="btn primary" id="saveH" ${S.port && S.port.pending ? "disabled" : ""}>${S.port && S.port.pending ? '<span class="spin"></span> 분석 중…' : "저장하고 분석"}</button><span class="note" id="hmsg">${S.hMsg || ""}</span></div></div>`;
 }
-function readHoldings() {
+function readHoldings(keepEmpty) {
   const H = [];
   document.querySelectorAll("#hrows .hold-row").forEach(r => {
-    const t = r.querySelector('[data-k="t"]').value.trim().toUpperCase().replace(".", "-"), s = parseFloat(r.querySelector('[data-k="shares"]').value);
-    if (t) H.push({ t, shares: Number.isFinite(s) ? s : 0 });
+    const t = r.querySelector('[data-k="t"]').value.trim().toUpperCase().replace(".", "-"), raw = r.querySelector('[data-k="shares"]').value, s = parseFloat(raw);
+    if (t || keepEmpty) H.push({ t, shares: keepEmpty && raw === "" ? "" : Number.isFinite(s) ? s : 0 });
   });
   return H;
 }
@@ -252,7 +304,9 @@ function renderPort() {
   if (!S.ctx) { el.innerHTML = spin(); return; }
   let html = holdingsEditor();
   const P = S.port;
-  if (P && !P.empty) {
+  if (P && P.pending) html += `<div class="card"><h2>분석 중</h2><p class="desc">${spin("VaR·위기 시나리오·한도를 계산하고 있습니다. 휴대폰에서는 몇 초 걸릴 수 있어요. 그동안 입력은 계속 하셔도 됩니다.")}</p></div>`;
+  else if (P && P.error) html += `<div class="card"><h2>분석하지 못했습니다</h2><p class="desc">${esc(P.error)}</p></div>`;
+  if (portReady()) {
     const W = P.W, d = P.diag, V = d.V, C = d.C, m = S.set.varMethod;
     if (W.missing.length) html += `<div class="banner">${W.missing.join(", ")}: 아직 시세 데이터가 없어 계산에서 빠져 있습니다. 보유내역이 알림 서버에 올라가 있으면 다음 자동 점검 때 시세를 받아옵니다(홈의 '지금 점검'을 누르면 3~5분).</div>`;
     const vl = { "양호": "ok", "보통": "warning", "점검 필요": "critical" }[d.verdict];
@@ -341,17 +395,19 @@ function plansCard(d) {
 }
 function bindPlans() {
   const g = $("#planGo"); if (!g) return;
-  g.onclick = () => { $("#planBox").innerHTML = spin("재편안 계산 중…"); later(() => calcPlans(+$("#planT").value)); };
+  g.onclick = () => { $("#planBox").innerHTML = spin("재편안 계산 중… 잠시만 기다려 주세요"); g.disabled = true; calcPlans(+$("#planT").value).catch(e => { const b = $("#planBox"); if (b) b.textContent = "계산 실패: " + (e.message || e); }); };
   document.querySelectorAll("[data-plan]").forEach(b => b.onclick = () => {
     const p = S.plans.plans[+b.dataset.plan]; const H0 = curHoldings();
     const rows = H0.map(h => ({ t: h.t, now: h.shares, shares: 0 }));
     for (const h of p.holdings) { const r = rows.find(x => x.t === h.t); if (r) r.shares = h.shares; else rows.push({ t: h.t, now: 0, shares: h.shares }); }
-    S.sim = { rows }; runSim(); renderPort(); const el = $("#simCard"); if (el) el.scrollIntoView({ behavior: "smooth" });
+    S.sim = { rows }; S.simRes = null; renderPort(); const el = $("#simCard"); if (el) el.scrollIntoView({ behavior: "smooth" });
+    $("#simOut").innerHTML = spin("시뮬레이션 계산 중…"); runSim().then(() => refreshPort());
   });
 }
 // ───────── 재편 시뮬레이션 ─────────
 function simRows() { if (!S.sim) S.sim = { rows: curHoldings().map(h => ({ t: h.t, now: h.shares, shares: h.shares })) }; return S.sim.rows; }
 function simCard() {
+  if (!portReady()) return "";
   const opts = E.tickers(S.ctx).sort().map(t => `<option value="${t}">${esc(S.market.names[t] || "")}</option>`).join("");
   const R = simRows(), lp = S.market.last_px, fx = S.market.meta.fx_now;
   let html = `<div class="card" id="simCard"><h2>재편 시뮬레이션</h2><p class="desc">바꿀 주수를 넣고 '계산'을 누르면 같은 한도·같은 계산 창으로 지금과 비교합니다. 매매 차액은 원화 현금으로 처리합니다.</p>
@@ -370,12 +426,15 @@ function readSim() {
 }
 function runSim() {
   const P = S.port, R = simRows(), lp = S.market.last_px, fx = S.market.meta.fx_now;
+  if (!portReady()) return Promise.resolve();
   const H0 = curHoldings(), H1 = R.filter(r => r.t && r.shares > 0).map(r => ({ t: r.t, shares: r.shares }));
   const unknown = H1.filter(h => !S.ctx.R[h.t] || !lp[h.t]).map(h => h.t);
   const val = H => H.reduce((a, h) => a + (lp[h.t] ? h.shares * lp[h.t] * fx : 0), 0);
   const cash0 = +S.cash || 0, diff = val(H0) - val(H1), cash1 = Math.max(0, cash0 + diff);
-  const C = E.compareHoldings(S.ctx, H0, cash0, H1.filter(h => unknown.indexOf(h.t) < 0), cash1, { limAmt: P.diag.limAmt, erp: P.set.erp || S.market.defaults.erp, h: E.limHC(S.set.limit).h, c: E.limHC(S.set.limit).c });
-  S.simRes = { C, cash0, cash1, deposit: Math.max(0, -(cash0 + diff)), unknown, H1 };
+  busyOn("sim", "시뮬레이션 계산 중… 잠시만 기다려 주세요");
+  return job("compare", { H0, cash0, H1: H1.filter(h => unknown.indexOf(h.t) < 0), cash1, opt: { limAmt: P.diag.limAmt, erp: P.set.erp || S.market.defaults.erp, h: E.limHC(S.set.limit).h, c: E.limHC(S.set.limit).c } })
+    .then(C => { S.simRes = { C, cash0, cash1, deposit: Math.max(0, -(cash0 + diff)), unknown, H1 }; })
+    .finally(() => busyOff("sim"));
 }
 function simResHtml() {
   const { C, cash1, deposit, unknown } = S.simRes, a = C.a, b = C.b;
@@ -403,7 +462,8 @@ function bindSim() {
   document.querySelectorAll("[data-ss],[data-st]").forEach(el => el.oninput = readSim);
   $("#simAdd").onclick = () => { readSim(); simRows().push({ t: "", now: 0, shares: 0 }); renderPort(); };
   $("#simReset").onclick = () => { S.sim = null; S.simRes = null; renderPort(); };
-  go.onclick = () => { readSim(); $("#simOut").innerHTML = spin("계산 중…"); later(() => { runSim(); $("#simOut").innerHTML = simResHtml(); bindSimApply(); }); };
+  go.onclick = () => { readSim(); go.disabled = true; $("#simOut").innerHTML = spin("계산 중… 잠시만 기다려 주세요");
+    runSim().then(() => { go.disabled = false; const o = $("#simOut"); if (o) { o.innerHTML = simResHtml(); bindSimApply(); } }).catch(e => { go.disabled = false; const o = $("#simOut"); if (o) o.textContent = "계산 실패: " + (e.message || e); }); };
   bindSimApply();
 }
 function bindSimApply() {
@@ -411,8 +471,9 @@ function bindSimApply() {
   b.onclick = () => {
     if (!b.dataset.ok) { b.dataset.ok = 1; b.textContent = "한 번 더 누르면 실제 보유내역이 바뀝니다"; return; }
     S.holdings = S.simRes.H1.map(h => ({ t: h.t, shares: h.shares })); S.cash = Math.round(S.simRes.cash1);
-    LS.set("holdings", S.holdings); LS.set("cash", S.cash); S.sim = null; S.simRes = null;
-    computePort(); renderPort(); renderHome();
+    LS.set("holdings", S.holdings); LS.set("cash", S.cash); S.sim = null; S.simRes = null; S.hDraft = null; S.cashDraft = undefined;
+    S.hMsg = "시뮬레이션 구성을 보유내역에 반영했습니다";
+    computePort(); renderHome();
     const pw = LS.get("pw", ""); if (S.token && pw) syncUp(pw).catch(() => { });
     window.scrollTo(0, 0);
   };
@@ -434,22 +495,23 @@ function recHtml() {
 }
 function bindRec() { document.querySelectorAll("[data-fr]").forEach(b => b.onclick = () => { S.overlay = +b.dataset.fr; S.frIdx = null; S.frZoom = true; S.frZoomRange = null; go("fr"); }); }
 function bindHoldings() {
-  const sync = () => { S.holdings = readHoldings(); };
+  const draft = () => { S.hDraft = readHoldings(true); S.cashDraft = $("#cash").value; };
   const ar = $("#addRow"); if (!ar) return;
-  ar.onclick = () => { sync(); S.holdings.push({ t: "", shares: "" }); renderPort(); };
-  document.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { sync(); S.holdings.splice(+b.dataset.del, 1); renderPort(); });
+  // 입력할 때마다 초안에 담아 둠 → 화면을 다시 그려도 입력한 값이 남음 (저장 전까지 실제 보유내역은 그대로)
+  document.querySelectorAll("#hrows input, #cash").forEach(el => el.addEventListener("input", draft));
+  ar.onclick = () => { draft(); S.hDraft.push({ t: "", shares: "" }); renderPort(); };
+  document.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { draft(); S.hDraft.splice(+b.dataset.del, 1); renderPort(); });
   $("#saveH").onclick = () => {
-    sync(); S.holdings = S.holdings.filter(h => h.t && h.shares > 0); S.cash = +($("#cash").value || 0);
+    draft(); S.holdings = S.hDraft.filter(h => h.t && h.shares > 0).map(h => ({ t: h.t, shares: +h.shares })); S.cash = +(S.cashDraft || 0);
+    S.hDraft = null; S.cashDraft = undefined;
     LS.set("holdings", S.holdings); LS.set("cash", S.cash);
     const unk = S.holdings.filter(h => !S.ctx.R[h.t]).map(h => h.t);
     const msg = unk.length ? `저장됨. ${unk.join(", ")}는 다음 점검부터 반영` : "저장됨";
-    computePort(); renderPort(); renderHome();
-    const pw = LS.get("pw", "");
-    if (S.token && pw) {
-      $("#hmsg").innerHTML = msg + ' · <span class="spin"></span> 알림 서버에 올리는 중';
-      syncUp(pw).then(() => { const m = $("#hmsg"); if (m) m.textContent = msg + " · 알림 서버에도 반영됨"; })
-        .catch(e => { const m = $("#hmsg"); if (m) m.textContent = msg + " · 알림 서버 반영 실패: " + (e.message || e); });
-    } else $("#hmsg").textContent = msg + (S.token ? "" : " (알림 서버 반영은 설정에서 한 번 연결)");
+    S.hMsg = msg + " · 분석 중…"; S.sim = null;
+    const pw = LS.get("pw", ""), up = S.token && pw ? syncUp(pw).then(() => " · 알림 서버에도 반영됨").catch(e => " · 알림 서버 반영 실패: " + (e.message || e)) : Promise.resolve(S.token ? "" : " (알림 서버 반영은 설정에서 한 번 연결)");
+    const done = computePort().then(() => " · 분석 완료");
+    renderHome();
+    Promise.all([done, up]).then(([a, b]) => { S.hMsg = msg + a + b; const m = $("#hmsg"); if (m) m.textContent = S.hMsg; else refreshPort(); });
   };
 }
 
@@ -732,7 +794,7 @@ function renderSet() {
     <div class="row"><button class="btn primary" id="presetB">B 방식으로 한 번에 설정</button></div>
     <p class="note">분기초 평가액의 20% 한도 + 분기 점검·5/25 허용범위(위험자산 안 비율 기준) + 현재 비중을 목표로 저장. 2018~2026 백테스트에서 고른 방식입니다.</p>
     <div class="row" style="margin-top:8px"><label class="small" style="width:100px">한도 방식</label><select id="limM" style="flex:1"><option value="pct" ${L.mode === "pct" ? "selected" : ""}>분기초 평가액의 %</option><option value="amount" ${L.mode !== "pct" ? "selected" : ""}>고정 금액</option></select></div>
-    <div class="row" id="limPRow" style="margin-top:6px;${L.mode === "pct" ? "" : "display:none"}"><label class="small" style="width:100px">분기초의</label><input type="number" step="1" id="limP" value="${((L.pct || 0.2) * 100).toFixed(0)}" style="width:80px">%<span class="note" id="limPNote">${S.port && !S.port.empty && S.port.diag.qStart ? `지금 기준 ${won(S.port.diag.limAmt)}` : ""}</span></div>
+    <div class="row" id="limPRow" style="margin-top:6px;${L.mode === "pct" ? "" : "display:none"}"><label class="small" style="width:100px">분기초의</label><input type="number" step="1" id="limP" value="${((L.pct || 0.2) * 100).toFixed(0)}" style="width:80px">%<span class="note" id="limPNote">${portReady() && S.port.diag.qStart ? `지금 기준 ${won(S.port.diag.limAmt)}` : ""}</span></div>
     <div class="row" id="limARow" style="margin-top:6px;${L.mode === "pct" ? "display:none" : ""}"><label class="small" style="width:100px">고정 금액(원)</label><input type="number" id="limA" value="${L.amount}" style="flex:1"></div>
     <div class="row" style="margin-top:6px"><label class="small" style="width:100px">기준</label>
       <select id="limH">${E.HORIZONS.map(([h, l]) => `<option value="${h}" ${h === L.h ? "selected" : ""}>${l}</option>`).join("")}</select>
@@ -800,7 +862,9 @@ function renderSet() {
 function go(v) {
   S.view = v; document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
   document.querySelectorAll("section.view").forEach(s => s.classList.toggle("on", s.id === "v-" + v));
-  window.scrollTo(0, 0); renderView();
+  window.scrollTo(0, 0);
+  if (v === "fr" || v === "mkt") { busyOn("view", "화면 준비 중…"); requestAnimationFrame(() => setTimeout(() => { try { renderView(); } finally { busyOff("view"); } }, 0)); }
+  else renderView();
 }
 function renderView() { ({ home: renderHome, port: renderPort, mkt: renderMkt, fr: renderFr, set: renderSet })[S.view](); }
 function renderAll() { renderHdr(); renderView(); }

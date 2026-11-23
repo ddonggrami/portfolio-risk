@@ -93,6 +93,10 @@ input[type=range]{width:100%;padding:0}
 .hold-row{display:grid;grid-template-columns:1fr 1fr auto;gap:6px;margin-bottom:6px}
 .banner{background:var(--row-alt);border-left:3px solid var(--warn);padding:8px 10px;border-radius:6px;font-size:12.5px;color:var(--ink2);margin-bottom:10px}
 .banner.ok{border-left-color:var(--good)}
+#busy{position:fixed;left:50%;transform:translate(-50%,12px);bottom:calc(72px + env(safe-area-inset-bottom));z-index:30;display:flex;gap:8px;align-items:center;max-width:calc(100% - 32px);padding:10px 16px;border-radius:999px;background:var(--ink);color:var(--card);font-size:13.5px;box-shadow:0 4px 16px rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .15s,transform .15s}
+#busy.on{opacity:1;transform:translate(-50%,0)}
+#busy .spin{border-color:rgba(127,127,127,.5);border-top-color:var(--card,#fff)}
+.btn[disabled]{opacity:.6}
 .spin{display:inline-block;width:14px;height:14px;border:2px solid var(--grid);border-top-color:var(--accent);border-radius:50%;animation:sp 0.8s linear infinite;vertical-align:-2px}
 @keyframes sp{to{transform:rotate(360deg)}}
 .empty{padding:20px 6px;text-align:center;color:var(--ink2)}
@@ -121,6 +125,7 @@ details summary{cursor:pointer;color:var(--ink2);font-size:13px}
   <section class="view" id="v-fr"></section>
   <section class="view" id="v-set"></section>
 </main>
+<div id="busy" role="status" aria-live="polite"><span class="spin"></span><span id="busyMsg"></span></div>
 <nav class="bottom" id="nav">
   <button data-v="home" class="on"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>홈</button>
   <button data-v="port"><svg viewBox="0 0 24 24"><path d="M3 7h18v13H3zM8 7V4h8v3"/></svg>내 포트</button>

@@ -863,5 +863,19 @@
   function fmtW(x) { if (!Number.isFinite(x)) return "–"; const m = x / 1e4; return (Math.abs(m) >= 10000 ? (m / 1e4).toFixed(2) + "억" : Math.round(m).toLocaleString("ko-KR") + "만") + "원"; }
   E.fmt = { pct, pp, won: fmtW };
 
+  // ───────────────────────── 백그라운드 작업 (Web Worker 와 화면 쪽 대체 실행이 같이 씀) ─────────────────────────
+  E.runJob = function (ctx, kind, a) {
+    if (kind === "analyze") {
+      const W = E.weights(ctx, a.H, a.cash);
+      if (!Object.keys(W.w).length) return { W, empty: true };
+      const diag = E.diagnose(ctx, W.w, W.nav, a.set);
+      return { W, diag, alerts: E.alerts(ctx, W.w, W.nav, diag, a.alertSet) };
+    }
+    if (kind === "recommend") return E.recommend(ctx, a.w, a.nav, a.diag, a.set);
+    if (kind === "plans") return E.limitPlans(ctx, a.H, a.cash, a.limAmt, a.opt);
+    if (kind === "compare") return E.compareHoldings(ctx, a.H0, a.cash0, a.H1, a.cash1, a.opt);
+    throw new Error("unknown job " + kind);
+  };
+
   if (typeof module !== "undefined" && module.exports) module.exports = E; else root.PRE = E;
 })(typeof globalThis !== "undefined" ? globalThis : this);
