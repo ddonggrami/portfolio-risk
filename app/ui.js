@@ -728,8 +728,8 @@ function renderSet() {
     <div class="row"><button class="btn primary" id="presetB">B 방식으로 한 번에 설정</button></div>
     <p class="note">분기초 평가액의 20% 한도 + 분기 점검·5/25 허용범위(위험자산 안 비율 기준) + 현재 비중을 목표로 저장. 2018~2026 백테스트에서 고른 방식입니다.</p>
     <div class="row" style="margin-top:8px"><label class="small" style="width:100px">한도 방식</label><select id="limM" style="flex:1"><option value="pct" ${L.mode === "pct" ? "selected" : ""}>분기초 평가액의 %</option><option value="amount" ${L.mode !== "pct" ? "selected" : ""}>고정 금액</option></select></div>
-    <div class="row" style="margin-top:6px"><label class="small" style="width:100px">분기초의</label><input type="number" step="1" id="limP" value="${((L.pct || 0.2) * 100).toFixed(0)}" style="width:80px">%<span class="note">'분기초 평가액의 %'일 때</span></div>
-    <div class="row" style="margin-top:6px"><label class="small" style="width:100px">고정 금액(원)</label><input type="number" id="limA" value="${L.amount}" style="flex:1"></div>
+    <div class="row" id="limPRow" style="margin-top:6px;${L.mode === "pct" ? "" : "display:none"}"><label class="small" style="width:100px">분기초의</label><input type="number" step="1" id="limP" value="${((L.pct || 0.2) * 100).toFixed(0)}" style="width:80px">%<span class="note" id="limPNote">${S.port && !S.port.empty && S.port.diag.qStart ? `지금 기준 ${won(S.port.diag.limAmt)}` : ""}</span></div>
+    <div class="row" id="limARow" style="margin-top:6px;${L.mode === "pct" ? "display:none" : ""}"><label class="small" style="width:100px">고정 금액(원)</label><input type="number" id="limA" value="${L.amount}" style="flex:1"></div>
     <div class="row" style="margin-top:6px"><label class="small" style="width:100px">기준</label>
       <select id="limH">${E.HORIZONS.map(([h, l]) => `<option value="${h}" ${h === L.h ? "selected" : ""}>${l}</option>`).join("")}</select>
       <select id="limC">${[0.95, 0.99].map(c => `<option value="${c}" ${c === L.c ? "selected" : ""}>${c * 100}%</option>`).join("")}</select> VaR</div>
@@ -765,6 +765,8 @@ function renderSet() {
     <details><summary>데이터</summary><p class="desc">Yahoo 수정주가(배당 재투자), FRED 3개월 T-bill·원/달러(실패 시 Yahoo). 상장 전 구간은 대용치: ${Object.entries(S.market ? S.market.proxy : {}).map(([k, v]) => `${k}←${v}`).join(", ")}.</p></details>
     <div class="row" style="margin-top:10px"><button class="btn" id="theme">다크/라이트 전환</button><button class="btn" id="wipe">이 기기 데이터 지우기</button></div>
     <p class="note">통계적 추정이며 투자 권유가 아닙니다.</p></div>`;
+  $("#limM").onchange = () => { const p = $("#limM").value === "pct"; $("#limPRow").style.display = p ? "" : "none"; $("#limARow").style.display = p ? "none" : ""; };
+  $("#limP").oninput = () => { const q = S.port && !S.port.empty && E.quarterStart(S.ctx, S.port.W.w, S.port.W.nav); const n = $("#limPNote"); if (q && n) n.textContent = `지금 기준 ${won(q.value * (+$("#limP").value / 100))} (분기초 ${won(q.value)})`; };
   $("#setSave").onclick = () => {
     S.set.limit = { mode: $("#limM").value, pct: +$("#limP").value / 100, amount: +$("#limA").value, h: +$("#limH").value, c: +$("#limC").value, warn: +$("#limW").value / 100 };
     S.set.erp = +$("#erp").value / 100; S.set.repo = $("#repo").value.trim(); saveSet(); computePort(); autoSync("#setMsg", "저장됨"); renderHdr();
