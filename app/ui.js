@@ -302,11 +302,12 @@ function renderPort() {
 function limActHtml(d) {
   const a = d.limAct;
   if (!a) return `<p class="note" style="margin-top:6px">조치 필요 없음 · 105% 넘으면 줄이고, 70% 아래면서 위험자산이 기본 비중보다 작으면 다시 늘립니다.</p>`;
-  if (a.kind === "cut") return `<div class="banner" style="margin-top:10px">한도 초과 — 위험자산 ${pct(a.k, 0)} → ${pct(a.kNew, 0)} 수준으로 줄여야 합니다. 바로 아래 <b>한도 맞춤 재편안</b>에서 방법 세 가지(같은 비율로 줄이기 / 위험 큰 종목 위주 / 다른 ETF 편입)와 주수를 확인하세요.</div>`;
+  if (a.kind === "cut") return a.reachable
+    ? `<div class="banner" style="margin-top:10px">한도 초과 — 목표 비율대로 위험자산 ${pct(a.k, 0)} → ${pct(a.kNew, 0)}(${won(a.amt)}어치)로 줄여 SGOV로 옮기면 사용률 90%가 됩니다. 아래 <b>한도 맞춤 재편안 ①</b>과 같은 계산이며, 종목별 주수와 다른 방법(원화 현금·위험 큰 종목 위주·다른 ETF 편입)도 거기 있습니다.</div>`
+    : `<div class="banner" style="margin-top:10px">한도 초과 — SGOV도 원화로 보면 환율 위험이 있어, SGOV로만 옮겨서는 VaR가 ${won(a.vFloor)} 아래로 내려가지 않습니다. 아래 재편안의 원화 현금·다른 ETF 안을 보세요.</div>`;
   const fx = S.market.meta.fx_now, lp = S.market.last_px;
   const rows = Object.entries(a.trades).filter(([, v]) => Math.abs(v) >= 1e4).sort((x, y) => Math.abs(y[1]) - Math.abs(x[1]))
     .map(([t, v]) => [t, `${v > 0 ? "매수" : "매도"} ${won(Math.abs(v))}`, lp[t] ? `약 ${Math.round(Math.abs(v) / (lp[t] * fx))}주` : "–"]);
-  if (lp.SGOV) rows.push(["SGOV", `${a.kind === "cut" ? "매수" : "매도"} ${won(a.amt)}`, `약 ${Math.round(a.amt / (lp.SGOV * fx))}주`]);
   return `<div class="action" style="margin-top:10px"><div class="spread"><span class="h">${a.kind === "cut" ? "한도 초과 — 위험자산 줄이기" : "여유 생김 — 위험자산 다시 늘리기"}</span>${badge(a.kind === "cut" ? "critical" : "info", `${pct(a.k, 0)} → ${pct(a.kNew, 0)}`)}</div>
     ${table(["종목", "매매", "주수"], rows)}<p class="note">${a.kind === "cut" ? "모든 위험자산을 같은 비율로 줄여 위험자산 안의 비율은 그대로 둡니다." : "목표비중의 위험자산 안 비율대로 삽니다."} 주수는 오늘 가격 기준 근사입니다.</p></div>`;
 }
@@ -320,10 +321,10 @@ function plansCard(d) {
   let body;
   if (!P) body = d.util > 1 ? spin("재편안 계산 중…") : `<p class="desc">지금은 한도 안(사용률 ${pct(d.util, 0)})이라 자동으로 계산하지 않았습니다. 미리 보려면 목표 사용률을 고르고 '계산'을 누르세요.</p>`;
   else if (!P.need) body = `<p class="desc">현재 사용률 ${pct(P.util0, 0)}로 이미 목표(${pct(tg, 0)}) 안입니다.</p>`;
-  else if (!P.plans.length) body = `<p class="desc">위험자산을 모두 줄여도 목표에 닿지 않습니다.</p>`;
-  else body = P.plans.map((p, i) => {
+  else if (!P.plans.length) body = `<p class="desc">위험자산을 모두 줄여도 목표에 닿지 않습니다. 목표 사용률을 높이거나 한도를 다시 정해 주세요.</p>`;
+  else body = (P.floorSGOV && !P.floorSGOV.reachable ? `<div class="banner">SGOV로 옮기는 것만으로는 목표에 닿지 않습니다. SGOV도 원화로 보면 환율 위험이 있어서, 위험자산을 ${pct(P.floorSGOV.k, 0)}까지 줄였을 때 1년 VaR ${won(P.floorSGOV.var)}가 최저입니다. 원화 현금·다른 ETF 안을 보세요.</div>` : "") + P.plans.map((p, i) => {
     const c = p.check;
-    return `<div class="action"><div class="spread"><span class="h">${["①", "②", "③", "④", "⑤"][i]} ${esc(p.title)}</span>${badge(c.util <= 1 ? "ok" : "critical", `사용률 ${pct(c.util, 0)}`)}</div>
+    return `<div class="action"><div class="spread"><span class="h">${["①", "②", "③", "④", "⑤", "⑥"][i]} ${esc(p.title)}</span>${badge(c.util <= 1 ? "ok" : "critical", `사용률 ${pct(c.util, 0)}`)}</div>
       <div class="note" style="margin:4px 0 8px">${esc(p.why)}</div>
       <div class="grid2 g-md-3">
         <div class="kpi"><div class="l">1년 95% VaR</div><div class="v">${won(c.var1y)}</div><div class="s">현재 ${won(P.var0)}</div></div>

@@ -472,21 +472,43 @@
     if (L && L.mode === "pct") { const q = E.quarterStart(ctx, w, nav); return { amt: (L.pct || 0.2) * q.value, q }; }
     return { amt: L.amount, q: null };
   };
-  // 한도 초과(>105%) → 위험자산을 사용률 90%가 되도록 비율대로 줄여 SGOV로.
-  // 사용률 70% 미만이고 위험자산이 기본 비중보다 작으면 → 다시 늘릴 여유. (2018~2026 백테스트의 B 규칙)
-  E.limitAction = function (w, nav, util, k0, sleeve) {
+  // 위험자산 크기 x 와 그 안의 비율 sleeve 로 만든 비중. 나머지 안전자산 몫은 dest(SGOV 또는 원화 현금)로
+  E.riskyMix = function (w, sleeve, x, dest) {
+    const o = {}; for (const t in w) if (isSafe(t)) o[t] = w[t];
+    const safeNow = Object.keys(o).reduce((a, t) => a + o[t], 0); dest = dest || "SGOV";
+    o[dest] = (o[dest] || 0) + (1 - x - safeNow); for (const t in sleeve) o[t] = (o[t] || 0) + sleeve[t] * x;
+    if (o[dest] < 0) { // 안전자산을 줄여야 하는 경우: SGOV → 현금 순으로 차감
+      let need = -o[dest]; o[dest] = 0;
+      for (const t of ["SGOV", CASH, "BIL", "SHV"]) if (o[t] > 0 && need > 0) { const d = Math.min(o[t], need); o[t] -= d; need -= d; }
+    }
+    for (const t in o) if (o[t] < 1e-12) delete o[t];
+    return o;
+  };
+  // VaR(실제 부트스트랩) ≤ vStar 를 만족하는 위험자산 크기를 [lo, hi] 안에서 찾음.
+  // SGOV 도 원화 기준으론 환율 위험이 있어 VaR 가 위험자산 크기에 비례하지 않고 바닥이 있으므로 먼저 바닥을 찾는다.
+  E.sizeRisky = function (ctx, w, sleeve, vStar, opt) {
+    opt = Object.assign({ dest: "SGOV", lo: 0, hi: E.riskyShare(w), f: null }, opt || {});
+    const tk = [...new Set([...Object.keys(w), ...Object.keys(sleeve), opt.dest])];
+    const f = opt.f || E.fastVar(ctx, tk), g = x => f(E.riskyMix(w, sleeve, x, opt.dest));
+    let xm = opt.lo, vm = Infinity;
+    for (let k = 0; k <= 20; k++) { const x = opt.lo + (opt.hi - opt.lo) * k / 20, v = g(x); if (v < vm) { vm = v; xm = x; } }
+    if (g(opt.hi) <= vStar) return { k: opt.hi, reachable: true, kFloor: xm, vFloor: vm, f };
+    if (vm > vStar) return { k: xm, reachable: false, kFloor: xm, vFloor: vm, f };
+    const x = Math.max(xm, bisect(y => g(y) > vStar, xm, opt.hi) - 1e-4);
+    return { k: x, reachable: true, kFloor: xm, vFloor: vm, f };
+  };
+  // B 규칙: 사용률 105% 초과 → 사용률 90%가 되는 크기까지 위험자산 축소(목표 비율 유지, 재편안 ①과 같은 계산).
+  // 사용률 70% 미만이고 위험자산이 기본 비중보다 작으면 → 90%까지 다시 늘릴 여유.
+  E.limitAction = function (ctx, w, nav, util, limAmt, k0, sleeve) {
     const k = E.riskyShare(w); if (!(k > 0.01) || !Number.isFinite(util)) return null;
-    if (util > 1.05) {
-      const kNew = k * 0.9 / util, f = 1 - kNew / k, trades = {};
-      for (const t in w) if (!isSafe(t) && w[t] > 0) trades[t] = -w[t] * f * nav;
-      return { kind: "cut", k, kNew, amt: (k - kNew) * nav, trades };
-    }
-    if (util < 0.7 && k0 && k < k0 - 0.02) {
-      const kNew = Math.min(k0, k * 0.9 / util), trades = {};
-      const sl = sleeve || (() => { const o = {}; for (const t in w) if (!isSafe(t)) o[t] = w[t] / k; return o; })();
-      for (const t in sl) trades[t] = (sl[t] * kNew - (w[t] || 0)) * nav;
-      return { kind: "add", k, kNew, amt: (kNew - k) * nav, trades };
-    }
+    const sl = sleeve || (() => { const o = {}; for (const t in w) if (!isSafe(t)) o[t] = w[t] / k; return o; })();
+    const mk = (kind, r) => {
+      const w1 = E.riskyMix(w, sl, r.k, "SGOV"), trades = {};
+      for (const t of new Set([...Object.keys(w), ...Object.keys(w1)])) { const d = ((w1[t] || 0) - (w[t] || 0)) * nav; if (Math.abs(d) > 1) trades[t] = d; }
+      return { kind, k, kNew: r.k, amt: Math.abs(k - r.k) * nav, trades, reachable: r.reachable, vFloor: r.vFloor * nav, kFloor: r.kFloor };
+    };
+    if (util > 1.05) return mk("cut", E.sizeRisky(ctx, w, sl, 0.9 * limAmt / nav, { hi: k }));
+    if (util < 0.7 && k0 && k < k0 - 0.02) { const r = E.sizeRisky(ctx, w, sl, 0.9 * limAmt / nav, { lo: k, hi: Math.min(k0, 1 - (w[CASH] || 0)) }); return r.k > k + 0.005 ? mk("add", r) : null; }
     return null;
   };
   // 목표비중(전체 기준) → 위험자산 안 비율과 기본 위험자산 비중
@@ -502,10 +524,10 @@
     const mk = ctx.market, items = [];
     const V = E.var(ctx, w, nav, { lam: set.lam });
     const LA = E.limitAmount(ctx, w, nav, set.limit), lim = V.boot[set.limit.h][set.limit.c].amt, util = lim / LA.amt;
-    const SL = E.sleeveOf(set.targets), act = E.limitAction(w, nav, util, SL.k0 || E.riskyShare(w), SL.sleeve);
+    const SL = E.sleeveOf(set.targets), act = E.limitAction(ctx, w, nav, util, LA.amt, SL.k0 || E.riskyShare(w), SL.sleeve);
     items.push({ key: "limit", label: "위험한도", level: util > 1 ? 2 : util > set.limit.warn ? 1 : 0,
       text: `1년 95% VaR ${fmtW(lim)} = 한도 ${fmtW(LA.amt)}${LA.q ? `(분기초 ${fmtW(LA.q.value)}의 ${pct(set.limit.pct, 0)})` : ""}의 ${pct(util, 0)}`
-        + (act ? (act.kind === "cut" ? ` → 위험자산 ${fmtW(act.amt)}를 SGOV로` : ` → 위험자산 ${fmtW(act.amt)} 다시 늘릴 여유`) : ""), value: util, th: 1 });
+        + (act ? (act.kind === "cut" ? (act.reachable ? ` → 위험자산 ${fmtW(act.amt)}어치 줄여 SGOV로 (재편안 ①)` : ` → SGOV로만은 한도에 못 맞춤 (재편안 참고)`) : ` → 위험자산 ${fmtW(act.amt)} 다시 늘릴 여유`) : ""), value: util, th: 1 });
     const C = E.contrib(ctx, w, set.lam); let top = null;
     for (const t in C) if (t[0] !== "_" && (!top || C[t].ewma > C[top].ewma)) top = t;
     const tc = C[top].ewma;
@@ -610,7 +632,11 @@
     for (const t in w1) { if (t === CASH || t === "SGOV" || !lp[t]) continue; const sh = Math.max(0, Math.round(w1[t] * nav / (lp[t] * fx))); if (sh > 0) H1[t] = sh; spent += sh * lp[t] * fx; }
     for (const t in cur) if (!(t in w1) && t !== "SGOV" && !lp[t]) H1[t] = cur[t];
     let rest = nav - spent - (w1[CASH] || 0) * nav;
-    if (lp.SGOV) { const sh = Math.max(0, Math.floor(rest / (lp.SGOV * fx))); if (sh > 0) H1.SGOV = sh; rest -= sh * lp.SGOV * fx; }
+    if (lp.SGOV) {
+      // 원화 현금으로 옮기는 안이면 SGOV 는 목표 주수 그대로(반올림 차액은 현금), 아니면 남는 돈을 SGOV 로
+      const sh = (w1[CASH] || 0) > 0.001 ? Math.max(0, Math.round((w1.SGOV || 0) * nav / (lp.SGOV * fx))) : Math.max(0, Math.floor(rest / (lp.SGOV * fx)));
+      if (sh > 0) H1.SGOV = sh; rest -= sh * lp.SGOV * fx;
+    }
     return { holdings: Object.entries(H1).map(([t, shares]) => ({ t, shares })), cash: Math.max(0, (w1[CASH] || 0) * nav + rest) };
   };
   E.tradeList = function (ctx, H0, H1) {
@@ -647,7 +673,7 @@
     const ER = E.capmER(ctx, [...new Set([...base, ...Object.keys(sleeve)])], set.erp);
     const erOf = x => Object.keys(x).reduce((a, t) => a + x[t] * (t === CASH ? ER._rf : (ER[t] !== undefined ? ER[t] : ER._rf)), 0);
     const safeBase = () => { const o = {}; for (const t of held) if (isSafe(t)) o[t] = w[t]; return o; };
-    const withRisky = (kk, sl) => { const o = safeBase(); const safeNow = sumBy(o, () => true); o.SGOV = (o.SGOV || 0) + (1 - kk - safeNow); for (const t in sl) o[t] = (o[t] || 0) + sl[t] * kk; return o; };
+    const withRisky = (kk, sl) => E.riskyMix(w, sl, kk, "SGOV");
     const plans = [];
     const finish = (key, title, why, w1, extra) => {
       const r = E.toShares(ctx, w1, nav, H0, cash0);
@@ -655,9 +681,12 @@
     };
     const fvS = Object.keys(sleeve).some(t => base.indexOf(t) < 0) ? E.fastVar(ctx, [...new Set([...base, ...Object.keys(sleeve)])]) : fv;
     if (v0 > vStar) {
-      // ① 목표 비율 유지
-      const kk = Math.max(0, bisect(x => fvS(withRisky(x, sleeve)) > vStar, 0, k) - 1e-4); // 한도 안에 드는 최대 위험자산 비중
-      finish("keep", "목표 비율 그대로 위험자산만 줄이기", `위험자산 ${pct(k, 0)} → ${pct(kk, 0)}, 줄인 만큼 SGOV`, withRisky(kk, sleeve));
+      // ① 목표 비율 유지 — 줄인 돈을 SGOV 로 / 원화 현금으로
+      const rS = E.sizeRisky(ctx, w, sleeve, vStar, { hi: k, f: fvS });
+      out.floorSGOV = { reachable: rS.reachable, k: rS.kFloor, var: rS.vFloor * nav };
+      if (rS.reachable) finish("keep", "목표 비율 그대로 줄이고 SGOV로", `위험자산 ${pct(k, 0)} → ${pct(rS.k, 0)}, 판 돈 ${fmtW((k - rS.k) * nav)}으로 SGOV 매수`, withRisky(rS.k, sleeve));
+      const rC = E.sizeRisky(ctx, w, sleeve, vStar, { hi: k, dest: CASH });
+      if (rC.reachable) finish("keepKRW", "목표 비율 그대로 줄이고 원화 현금으로", `위험자산 ${pct(k, 0)} → ${pct(rC.k, 0)}, 판 돈 ${fmtW((k - rC.k) * nav)}을 원화(CMA·파킹통장 등)로 — 환율 위험까지 같이 줄어 SGOV보다 덜 팔아도 됨`, E.riskyMix(w, sleeve, rC.k, CASH));
       // ② 위험기여 큰 종목부터 (한계 VaR: 1%p 를 SGOV 로 옮겼을 때 VaR 감소폭)
       let cur = Object.assign({}, w); const order = [], used = [];
       for (let step = 0; step < risky.length && fv(cur) > vStar; step++) {
@@ -770,7 +799,7 @@
         "위험한도", `1년 95% VaR 사용률 ${pct(u, 0)} (한도 ${fmtW(diag.limAmt || set.limit.amount)})`, u > 1 ? "한도 초과 중" : `한도까지 ${pct(1 - u, 0)}p 여유`, `위험한도 ${pct(u, 0)}`);
       const la = diag.limAct;
       if (la) add(`lim:${la.kind}`, la.kind === "cut" ? "critical" : "info", la.kind === "cut" ? "한도 축소" : "다시 늘리기",
-        la.kind === "cut" ? `위험자산 ${pct(la.k, 0)} → ${pct(la.kNew, 0)} (각 종목 같은 비율로 팔아 SGOV로)` : `사용률 ${pct(u, 0)} — 위험자산 ${pct(la.k, 0)} → ${pct(la.kNew, 0)}까지 늘려도 한도 90% 안`,
+        la.kind === "cut" ? (la.reachable ? `위험자산 ${pct(la.k, 0)} → ${pct(la.kNew, 0)} (목표 비율대로 팔아 SGOV로)` : `SGOV로 옮겨도 VaR가 ${fmtW(la.vFloor)} 아래로 안 내려감 — 원화 현금 또는 다른 ETF 필요`) : `사용률 ${pct(u, 0)} — 위험자산 ${pct(la.k, 0)} → ${pct(la.kNew, 0)}까지 늘려도 한도 90% 안`,
         Object.entries(la.trades).filter(([, v]) => Math.abs(v) >= 1e4).map(([t, v]) => `${t} ${v > 0 ? "+" : "−"}${fmtW(Math.abs(v))}`).join(", "),
         la.kind === "cut" ? `한도 초과 → 위험자산 ${fmtW(la.amt)} SGOV로` : `위험자산 ${fmtW(la.amt)} 늘릴 여유`);
       const pr = E.basketSeries(ctx, w, "KRW"), today = pr[ctx.n - 1];
