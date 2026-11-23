@@ -105,8 +105,8 @@ function changeLines(max) {
 }
 function headline() {
   if (!diag) return "보유내역 미동기화 · 시장만 점검";
-  const v = diag.V.boot[252][0.95].amt;
-  return `진단 ${diag.verdict} · 1년VaR ${F.won(v)}(한도 ${F.pct(diag.util, 0)})`;
+  const hc = E.limHC(set.limit), v = diag.V.boot[hc.h][hc.c].amt;
+  return `진단 ${diag.verdict} · ${E.limLabel(set.limit).replace(" VaR", "").replace(" ", "")}VaR ${F.won(v)}(한도 ${F.pct(diag.util, 0)})`;
 }
 const rg = market.regime;
 

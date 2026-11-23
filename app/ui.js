@@ -80,13 +80,13 @@ const INFO = {
   "VaR": ["VaR 계산 방식", "주어진 기간·확률에서 '이 정도까지는 잃을 수 있다'는 경계입니다(최악의 손실 아님).",
     [["블록 부트스트랩", "최근 10년 일간 수익을 21일(1개월) 묶음으로 1만 번 재표본. 폭락이 몰려오는 성질을 보존."], ["EWMA", "최근 변동성(λ=0.94, 체감 약 1개월)이 계속된다고 가정. 위험이 커지는 걸 가장 빨리 반영."], ["역사적 250일", "최근 1년 실제 손익. 바젤 은행 규제 방식."],
      ["가정", "현재 비중이 그대로 유지된다고 가정합니다(리밸런싱 규칙은 아래 리밸런싱 카드에서 따로 비교)."]]],
-  "위험한도": ["위험한도 (B 방식)", "1년 95% VaR가 한도를 넘지 않도록 <b>위험자산의 크기</b>만 조절하고, 위험자산 <b>안의 비율</b>은 분기 리밸런싱이 맞춥니다.",
+  "위험한도": ["위험한도 (B 방식)", "한도 기준 VaR(설정에서 고른 기간·신뢰수준)가 한도를 넘지 않도록 <b>위험자산의 크기</b>만 조절하고, 위험자산 <b>안의 비율</b>은 분기 리밸런싱이 맞춥니다.",
     [["한도 금액", "기본: 분기 첫날 평가액의 20%. 분기마다 새로 잡힙니다(손실이 나면 다음 분기 한도도 같이 줄어듦). 고정 금액으로 바꿀 수도 있습니다."],
      ["줄일 때", "사용률이 105%를 넘으면, 사용률이 90%가 되도록 모든 위험자산을 같은 비율로 팔아 SGOV로 옮깁니다. VaR는 위험자산 크기에 거의 비례하므로 이렇게 계산합니다."],
      ["다시 늘릴 때", "사용률이 70% 아래로 내려오고 위험자산이 기본 비중(목표비중의 위험자산 합)보다 작으면, 90%가 되는 선까지 목표 비율대로 다시 삽니다."],
      ["분기초 평가액", "지금 보유 수량을 직전 분기 마지막 거래일 종가(원화)로 계산한 값입니다. 분기 중에 매매했다면 약간 다를 수 있습니다."],
      ["근거", "2018~2026 백테스트(원화): 연수익 19.8%, 변동성 16.7%, 최대낙폭 −25.9%. 그대로 보유는 25.9% / 30.1% / −51.5%."]]],
-  "한도 맞춤 재편안": ["한도 맞춤 재편안", "1년 95% VaR 사용률을 목표(기본 90%)까지 낮추는 방법을 세 가지로 계산합니다. 각 안은 정수 주로 맞춘 뒤 VaR를 다시 계산했습니다.",
+  "한도 맞춤 재편안": ["한도 맞춤 재편안", "한도 기준 VaR(설정에서 고른 기간·신뢰수준) 사용률을 목표(기본 90%)까지 낮추는 방법을 세 가지로 계산합니다. 각 안은 정수 주로 맞춘 뒤 VaR를 다시 계산했습니다.",
     [["① 같은 비율로 줄이기", "위험자산 안의 목표 비율은 그대로 두고 전체 크기만 줄여 SGOV로. 리밸런싱 규칙과 충돌이 없는 기본안."],
      ["② 위험 큰 종목 위주", "1%p를 SGOV로 옮겼을 때 VaR가 가장 많이 줄어드는 종목부터 팝니다. 매매 건수가 적지만 목표 비율에서 벗어납니다."],
      ["③ 다른 ETF 편입", "시장·후보 목록의 ETF(이력 5년 이상) 중, 일부(10~30%)를 편입하고 나머지 초과분만 SGOV로 옮겼을 때 균형 기대수익이 가장 높게 남는 조합. ①보다 나을 때만 표시합니다."],
@@ -169,7 +169,7 @@ function curHoldings() { return S.holdings.filter(h => h.t && h.shares > 0); }
 function calcPlans(target, quiet) {
   const P = S.port; if (!P || P.empty) return;
   S.planTarget = target;
-  S.plans = E.limitPlans(S.ctx, curHoldings(), +S.cash || 0, P.diag.limAmt, { target, targets: S.set.targets, erp: P.set.erp || S.market.defaults.erp });
+  S.plans = E.limitPlans(S.ctx, curHoldings(), +S.cash || 0, P.diag.limAmt, { target, targets: S.set.targets, erp: P.set.erp || S.market.defaults.erp, h: E.limHC(S.set.limit).h, c: E.limHC(S.set.limit).c });
   if (!quiet && S.view === "port") renderPort();
 }
 
@@ -208,7 +208,7 @@ function renderHome() {
     html += `<div class="card"><div class="spread"><h2>내 포트폴리오 진단</h2>${badge(vl, d.verdict)}</div>
       <p class="desc">총 ${won(S.port.W.nav)} · 위험 쪽 5개 항목 종합</p>
       ${d.items.map(i => `<div class="alert">${badge(["ok", "warning", "critical"][i.level], i.label)}<div class="t">${esc(i.text)}</div></div>`).join("")}
-      <div style="margin-top:8px">${S.rec ? (S.rec.actions[0] ? `<b>지금 할 일 1순위:</b> ${esc(S.rec.actions[0].title)} — 변동성 ${sgp(S.rec.actions[0].dVolEwma)}, 1년 VaR ${won(S.rec.actions[0].var1y0)} → ${won(S.rec.actions[0].var1y1)}` : "추천할 변경 없음") : '<span class="spin"></span> 추천 계산 중'}
+      <div style="margin-top:8px">${S.rec ? (S.rec.actions[0] ? `<b>지금 할 일 1순위:</b> ${esc(S.rec.actions[0].title)} — 변동성 ${sgp(S.rec.actions[0].dVolEwma)}, ${E.limLabel(S.set.limit)} ${won(S.rec.actions[0].varL0)} → ${won(S.rec.actions[0].varL1)}` : "추천할 변경 없음") : '<span class="spin"></span> 추천 계산 중'}
       <button class="btn" style="margin-left:6px" data-go="port">자세히</button></div></div>`;
     const A = S.port.alerts, act = A.filter(a => a.level !== "ok");
     html += `<div class="card"><h2>알림 상태</h2><p class="desc">알림이 없다면 아래 항목이 모두 기준 안에 있다는 뜻입니다. 오른쪽은 기준까지 남은 거리입니다.</p>
@@ -267,12 +267,13 @@ function renderPort() {
       ${table(["종목", "평가액", "비중", "위험기여(최근)", "위험기여(3년)", "연변동성(최근)", "상대강도"], tk.map(t => [t, won(W.values[t]), pct(W.w[t]), C[t] ? pct(C[t].ewma) : "–", C[t] ? pct(C[t].y3) : "–", C[t] ? pct(C[t].ewma_vol) : "–", S.market.rs[t] ? badge(stateLevel(S.market.rs[t].state), S.market.rs[t].state) : "–"]))}</div>`;
     // VaR
     const util = d.util, ucol = util > 1 ? "--crit" : util > S.set.limit.warn ? "--warn" : "--good";
-    const rows = E.HORIZONS.map(([h, lab]) => { const r = V[m][h]; if (!r) return null; return [lab, `${won(r[0.95].amt)}<br><span class="note">${pct(r[0.95].pct)}</span>`, `${won(r[0.99].amt)}<br><span class="note">${pct(r[0.99].pct)}</span>`, `${won(r[0.95].es_amt)}`]; }).filter(Boolean);
+    const rows = E.HORIZONS.map(([h, lab]) => { const r = V[m][h]; if (!r) return null; const LH = E.limHC(S.set.limit), mark = c => h === LH.h && c === LH.c ? ' style="color:var(--accent);font-weight:700"' : "";
+      return [h === LH.h ? `<b>${lab}</b> <span class="pill">한도 기준</span>` : lab, `<span${mark(0.95)}>${won(r[0.95].amt)}</span><br><span class="note">${pct(r[0.95].pct)}</span>`, `<span${mark(0.99)}>${won(r[0.99].amt)}</span><br><span class="note">${pct(r[0.99].pct)}</span>`, `${won(r[0.95].es_amt)}`]; }).filter(Boolean);
     html += `<div class="card"><h2>VaR (원화 기준, 환율 위험 포함) ${ib("VaR")}</h2>
       <div class="seg" id="varSeg">${[["boot", "블록 부트스트랩"], ["ewma", "EWMA(최근 변동성)"], ["hs250", "역사적 250일"]].map(([k, l]) => `<button data-k="${k}" class="${k === m ? "on" : ""}">${l}</button>`).join("")}</div>
       <p class="desc">${{ boot: `최근 ${V.years}년 일간 수익을 21일 블록으로 1만 번 재표본. 기대 초과수익 0 가정.`, ewma: "최근 변동성(λ=0.94, 체감 약 1개월)이 그대로 이어진다고 가정한 정규 근사.", hs250: "최근 250거래일 실제 손익. 10일은 √10 환산(바젤 관행)." }[m]}</p>
       ${table(["기간", "95% VaR", "99% VaR", "95% ES"], rows)}
-      <h3>위험한도: ${S.set.limit.h === 252 ? "1년" : S.set.limit.h + "일"} ${Math.round(S.set.limit.c * 100)}% VaR ≤ ${won(d.limAmt)} ${ib("위험한도")}</h3>
+      <h3>위험한도: ${E.limLabel(S.set.limit)} ≤ ${won(d.limAmt)} ${ib("위험한도")}</h3>
       ${d.qStart ? `<p class="note">분기초(${d.qStart.date}) 평가액 ${won(d.qStart.value)}의 ${pct(S.set.limit.pct, 0)} · 분기 들어 ${sg(d.qStart.chg)} · 위험자산 비중 ${pct(d.riskyK, 0)}${d.k0 ? ` (기본 ${pct(d.k0, 0)})` : ""}</p>` : ""}
       <div class="meter" role="img" aria-label="사용률 ${pct(util, 0)}"><i style="width:${Math.min(util, 1.5) / 1.5 * 100}%;background:var(${ucol})"></i><b style="left:${100 / 1.5}%"></b></div>
       <div class="note">사용률 ${pct(util, 0)} (부트스트랩 기준) · 세로선 = 한도 100%</div>${limActHtml(d)}</div>`;
@@ -322,12 +323,12 @@ function plansCard(d) {
   if (!P) body = d.util > 1 ? spin("재편안 계산 중…") : `<p class="desc">지금은 한도 안(사용률 ${pct(d.util, 0)})이라 자동으로 계산하지 않았습니다. 미리 보려면 목표 사용률을 고르고 '계산'을 누르세요.</p>`;
   else if (!P.need) body = `<p class="desc">현재 사용률 ${pct(P.util0, 0)}로 이미 목표(${pct(tg, 0)}) 안입니다.</p>`;
   else if (!P.plans.length) body = `<p class="desc">위험자산을 모두 줄여도 목표에 닿지 않습니다. 목표 사용률을 높이거나 한도를 다시 정해 주세요.</p>`;
-  else body = (P.floorSGOV && !P.floorSGOV.reachable ? `<div class="banner">SGOV로 옮기는 것만으로는 목표에 닿지 않습니다. SGOV도 원화로 보면 환율 위험이 있어서, 위험자산을 ${pct(P.floorSGOV.k, 0)}까지 줄였을 때 1년 VaR ${won(P.floorSGOV.var)}가 최저입니다. 원화 현금·다른 ETF 안을 보세요.</div>` : "") + P.plans.map((p, i) => {
+  else body = (P.floorSGOV && !P.floorSGOV.reachable ? `<div class="banner">SGOV로 옮기는 것만으로는 목표에 닿지 않습니다. SGOV도 원화로 보면 환율 위험이 있어서, 위험자산을 ${pct(P.floorSGOV.k, 0)}까지 줄였을 때 ${E.limLabel(S.set.limit)} ${won(P.floorSGOV.var)}가 최저입니다. 원화 현금·다른 ETF 안을 보세요.</div>` : "") + P.plans.map((p, i) => {
     const c = p.check;
     return `<div class="action"><div class="spread"><span class="h">${["①", "②", "③", "④", "⑤", "⑥"][i]} ${esc(p.title)}</span>${badge(c.util <= 1 ? "ok" : "critical", `사용률 ${pct(c.util, 0)}`)}</div>
       <div class="note" style="margin:4px 0 8px">${esc(p.why)}</div>
       <div class="grid2 g-md-3">
-        <div class="kpi"><div class="l">1년 95% VaR</div><div class="v">${won(c.var1y)}</div><div class="s">현재 ${won(P.var0)}</div></div>
+        <div class="kpi"><div class="l">${E.limLabel(S.set.limit)}</div><div class="v">${won(c.varL)}</div><div class="s">현재 ${won(P.var0)}</div></div>
         <div class="kpi"><div class="l">균형 기대수익 ${ib("균형 기대수익")}</div><div class="v">${pct(p.er1, 1)}</div><div class="s">현재 ${pct(p.er0, 1)} · 연</div></div>
         <div class="kpi"><div class="l">최악의 위기</div><div class="v">${c.worst ? sg(c.worst.krw) : "–"}</div><div class="s">${c.worst ? esc(c.worst.name) : ""}</div></div>
       </div>
@@ -373,7 +374,7 @@ function runSim() {
   const unknown = H1.filter(h => !S.ctx.R[h.t] || !lp[h.t]).map(h => h.t);
   const val = H => H.reduce((a, h) => a + (lp[h.t] ? h.shares * lp[h.t] * fx : 0), 0);
   const cash0 = +S.cash || 0, diff = val(H0) - val(H1), cash1 = Math.max(0, cash0 + diff);
-  const C = E.compareHoldings(S.ctx, H0, cash0, H1.filter(h => unknown.indexOf(h.t) < 0), cash1, { limAmt: P.diag.limAmt, erp: P.set.erp || S.market.defaults.erp });
+  const C = E.compareHoldings(S.ctx, H0, cash0, H1.filter(h => unknown.indexOf(h.t) < 0), cash1, { limAmt: P.diag.limAmt, erp: P.set.erp || S.market.defaults.erp, h: E.limHC(S.set.limit).h, c: E.limHC(S.set.limit).c });
   S.simRes = { C, cash0, cash1, deposit: Math.max(0, -(cash0 + diff)), unknown, H1 };
 }
 function simResHtml() {
@@ -382,8 +383,10 @@ function simResHtml() {
   const row = (lab, x, y, f, better) => { const d = Number.isFinite(x) && Number.isFinite(y) ? y - x : null; return [lab, f(x), `<b>${f(y)}</b>`, d === null || Math.abs(d) < 1e-9 ? "" : `<span class="${better === "none" ? "" : (better === "low" ? d < 0 : d > 0) ? "pos" : "neg"}">${better === "low" ? (d < 0 ? "▼" : "▲") : (d > 0 ? "▲" : "▼")}</span>`]; };
   const rows = [
     row("평가액(현금 포함)", a.nav, b.nav, won), row("SGOV·현금 외 비중", a.k, b.k, x => pct(x, 0), "none"),
-    row("1년 95% VaR", a.var1y, b.var1y, won, "low"), row("한도 사용률", a.util, b.util, x => pct(x, 0), "low"),
-    row("1년 95% ES", a.es1y, b.es1y, won, "low"), row("3개월 95% VaR", a.var3m, b.var3m, won, "low"), row("1개월 95% VaR", a.var1m, b.var1m, won, "low"), row("10일 95% VaR", a.var10d, b.var10d, won, "low"), row("1일 99% VaR", a.var1d99, b.var1d99, won, "low"),
+    row(`<b>${E.limLabel(S.set.limit)}</b> (한도 기준)`, a.varL, b.varL, won, "low"), row("한도 사용률", a.util, b.util, x => pct(x, 0), "low"),
+    row(E.limLabel(S.set.limit).replace("VaR", "ES"), a.esL, b.esL, won, "low"),
+    ...[[252, 0.95, "1년 95% VaR", "var1y"], [63, 0.95, "3개월 95% VaR", "var3m"], [21, 0.95, "1개월 95% VaR", "var1m"], [10, 0.95, "10일 95% VaR", "var10d"], [1, 0.99, "1일 99% VaR", "var1d99"]]
+      .filter(([h, c]) => !(h === E.limHC(S.set.limit).h && c === E.limHC(S.set.limit).c)).map(([, , lab, k]) => row(lab, a[k], b[k], won, "low")),
     row("연변동성(최근)", a.volNow, b.volNow, x => pct(x, 1), "low"), row("연변동성(3년)", a.vol3y, b.vol3y, x => pct(x, 1), "low"),
     row("최악의 위기", a.worst && a.worst.krw, b.worst && b.worst.krw, x => pct(x, 1)), row("균형 기대수익(연)", a.er, b.er, x => pct(x, 1)),
   ];
@@ -422,7 +425,7 @@ function recHtml() {
       <div class="note" style="margin:4px 0 8px">근거: ${esc(a.why)}</div>
       <div class="grid2 g-md-3">
         <div class="kpi"><div class="l">연변동성 (최근 / 3년)</div><div class="v">${sgp(a.dVolEwma)}</div><div class="s">${pct(a.volEwma0)}→${pct(a.volEwma1)} / ${pct(a.vol3y0)}→${pct(a.vol3y1)}</div></div>
-        <div class="kpi"><div class="l">1년 95% VaR</div><div class="v">${won(a.var1y1)}</div><div class="s">현재 ${won(a.var1y0)} · ${a.varYears}년 표본</div></div>
+        <div class="kpi"><div class="l">${E.limLabel(S.set.limit)}</div><div class="v">${won(a.varL1)}</div><div class="s">현재 ${won(a.varL0)} · ${a.varYears}년 표본</div></div>
         <div class="kpi"><div class="l">최악의 위기 (${a.nStress}개 비교)</div><div class="v">${sg(a.worst1)}</div><div class="s">현재 ${sg(a.worst0)}</div></div>
       </div>
       <div class="note" style="margin-top:6px">샤프 변화: ${ok}</div>
