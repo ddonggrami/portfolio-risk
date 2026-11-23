@@ -383,7 +383,7 @@ function simResHtml() {
   const rows = [
     row("평가액(현금 포함)", a.nav, b.nav, won), row("SGOV·현금 외 비중", a.k, b.k, x => pct(x, 0), "none"),
     row("1년 95% VaR", a.var1y, b.var1y, won, "low"), row("한도 사용률", a.util, b.util, x => pct(x, 0), "low"),
-    row("1년 95% ES", a.es1y, b.es1y, won, "low"), row("1개월 95% VaR", a.var1m, b.var1m, won, "low"), row("1일 99% VaR", a.var1d99, b.var1d99, won, "low"),
+    row("1년 95% ES", a.es1y, b.es1y, won, "low"), row("3개월 95% VaR", a.var3m, b.var3m, won, "low"), row("1개월 95% VaR", a.var1m, b.var1m, won, "low"), row("10일 95% VaR", a.var10d, b.var10d, won, "low"), row("1일 99% VaR", a.var1d99, b.var1d99, won, "low"),
     row("연변동성(최근)", a.volNow, b.volNow, x => pct(x, 1), "low"), row("연변동성(3년)", a.vol3y, b.vol3y, x => pct(x, 1), "low"),
     row("최악의 위기", a.worst && a.worst.krw, b.worst && b.worst.krw, x => pct(x, 1)), row("균형 기대수익(연)", a.er, b.er, x => pct(x, 1)),
   ];

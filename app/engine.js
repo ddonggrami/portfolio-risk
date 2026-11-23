@@ -655,7 +655,7 @@
       if (!Object.keys(W.w).length) return null;
       const V = E.var(ctx, W.w, W.nav, { from }), S = E.stress(ctx, W.w).filter(x => x.krw !== null).sort((a, b) => a.krw - b.krw)[0];
       const C = E.contrib(ctx, W.w, 0.94), er = Object.keys(W.w).reduce((a, t) => a + W.w[t] * (t === CASH ? ER._rf : ER[t]), 0);
-      return { nav: W.nav, w: W.w, k: E.riskyShare(W.w), var1y: V.boot[252][0.95].amt, var1yPct: V.boot[252][0.95].pct, var1d99: V.boot[1][0.99].amt, var1m: V.boot[21][0.95].amt, es1y: V.boot[252][0.95].es_amt,
+      return { nav: W.nav, w: W.w, k: E.riskyShare(W.w), var1y: V.boot[252][0.95].amt, var1yPct: V.boot[252][0.95].pct, var1d99: V.boot[1][0.99].amt, var1m: V.boot[21][0.95].amt, var10d: V.boot[10][0.95].amt, var3m: V.boot[63][0.95].amt, es1y: V.boot[252][0.95].es_amt,
         util: set.limAmt ? V.boot[252][0.95].amt / set.limAmt : null, volNow: V.sigma_ann, vol3y: C._vol ? C._vol.y3 : null, worst: S || null, er, years: V.years, missing: W.missing };
     };
     return { a: one(W0), b: one(W1), trades: E.tradeList(ctx, H0, H1), from: ctx.dates[from] };
