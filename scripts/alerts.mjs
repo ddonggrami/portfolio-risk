@@ -18,7 +18,7 @@ const F = E.fmt;
 // ───────── 이전 상태 (알림 키, 카카오 토큰) ─────────
 let prev = {};
 if (fs.existsSync("prev_state.json") && PW) { try { prev = await E.decrypt(readJSON("prev_state.json"), PW); } catch (e) { prev = {}; } }
-const state = { keys: prev.keys || {}, kakao: prev.kakao || null, kk: prev.kk || {} };
+const state = { keys: prev.keys || {}, kakao: prev.kakao || null, kk: prev.kk || {}, lastWeekly: prev.lastWeekly || null };
 const status = { kind: KIND, portfolio: false, telegram: (process.env.TELEGRAM_BOT_TOKEN ? "configured" : "off") };
 
 // ───────── 카카오톡 ─────────
@@ -116,7 +116,10 @@ const rg = market.regime;
 
 if (KIND === "deploy") {
   log("배포 실행 — 알림 보내지 않음");
+} else if (KIND === "weekly" && state.lastWeekly && (Date.now() - Date.parse(state.lastWeekly)) < 3 * 864e5) {
+  log("이번 주 주간 리포트는 이미 보냄 — 건너뜀"); // GitHub 예약 실행과 외부 스케줄러가 겹칠 때
 } else if (KIND === "weekly") {
+  state.lastWeekly = new Date().toISOString();
   let top = "";
   if (diag) { try { const R = E.recommend(ctx, W.w, W.nav, diag, set); if (R.actions[0]) top = `1순위: ${R.actions[0].title}`; } catch (e) { } }
   const warn = Object.values(cur).sort(sortLv).slice(0, 3).map(a => a.short).join(" · ");

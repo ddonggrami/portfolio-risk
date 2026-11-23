@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       reason:
-        description: "manual = 지금 점검 결과, weekly = 주간 리포트, deploy = 앱만 갱신(알림 없음), hourly/daily = 외부 스케줄러가 보내는 정기 점검"
+        description: "manual = 지금 점검 결과, weekly = 주간 리포트, deploy = 앱만 갱신(알림 없음), auto = 외부 스케줄러(시각 보고 판단), hourly/daily = 정기 점검"
         required: false
         default: "manual"
 
@@ -22,21 +22,37 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # 실행 종류 판정. 외부 스케줄러(cron-job.org)는 매시간 reason=auto 로 부르고, 여기서 시각을 보고 할 일을 정함
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      kind: ${{ steps.kind.outputs.kind }}
+    steps:
+      - name: Run kind
+        id: kind
+        run: |
+          auto() { # UTC 기준: 일 00시 주간 / 평일 23시 아침 확정 점검 / 평일 14~21시 장중 매시간 / 그 외 건너뜀
+            dow=$(date -u +%u); h=$((10#$(date -u +%H)))
+            if [ "$dow" = 7 ] && [ "$h" = 0 ]; then echo weekly
+            elif [ "$dow" -le 5 ] && [ "$h" = 23 ]; then echo daily
+            elif [ "$dow" -le 5 ] && [ "$h" -ge 14 ] && [ "$h" -le 21 ]; then echo hourly
+            else echo skip; fi; }
+          case "${{ github.event_name }}:${{ github.event.schedule }}" in
+            workflow_dispatch:*) case "${{ github.event.inputs.reason }}" in weekly|deploy|hourly|daily) k="${{ github.event.inputs.reason }}" ;; auto) k=$(auto) ;; *) k=manual ;; esac ;;
+            "schedule:13 0 * * 0") k=weekly ;;
+            "schedule:17 23 * * 1-5") k=daily ;;
+            *) k=hourly ;;
+          esac
+          echo "kind=$k" | tee -a "$GITHUB_OUTPUT"
+
   build:
+    needs: gate
+    if: needs.gate.outputs.kind != 'skip'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-
-      - name: Run kind
-        id: kind
-        run: |
-          case "${{ github.event_name }}:${{ github.event.schedule }}" in
-            workflow_dispatch:*) case "${{ github.event.inputs.reason }}" in weekly) echo "kind=weekly" >> "$GITHUB_OUTPUT" ;; deploy) echo "kind=deploy" >> "$GITHUB_OUTPUT" ;; hourly) echo "kind=hourly" >> "$GITHUB_OUTPUT" ;; daily) echo "kind=daily" >> "$GITHUB_OUTPUT" ;; *) echo "kind=manual" >> "$GITHUB_OUTPUT" ;; esac ;;
-            "schedule:13 0 * * 0") echo "kind=weekly" >> "$GITHUB_OUTPUT" ;;
-            "schedule:17 23 * * 1-5") echo "kind=daily" >> "$GITHUB_OUTPUT" ;;
-            *) echo "kind=hourly" >> "$GITHUB_OUTPUT" ;;
-          esac
 
       - uses: actions/setup-python@v5
         with:
@@ -82,7 +98,7 @@ jobs:
 
       - name: Alerts
         env:
-          RUN_KIND: ${{ steps.kind.outputs.kind }}
+          RUN_KIND: ${{ needs.gate.outputs.kind }}
           PORTFOLIO_PASSWORD: ${{ secrets.PORTFOLIO_PASSWORD }}
           KAKAO_REST_KEY: ${{ secrets.KAKAO_REST_KEY }}
           KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
