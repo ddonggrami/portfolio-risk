@@ -451,13 +451,61 @@
     };
   };
 
+  // ───────────────────────── 위험한도 (B 방식: 분기초 평가액 기준 + 위험자산 크기 조절) ─────────────────────────
+  E.SAFE = ["SGOV", "BIL", "SHV", "TBILL", CASH];
+  const isSafe = t => E.SAFE.indexOf(t) >= 0;
+  E.isSafe = isSafe;
+  E.riskyShare = w => Object.keys(w).filter(t => !isSafe(t)).reduce((a, t) => a + w[t], 0);
+  E.quarterOf = d => d.slice(0, 4) + "Q" + Math.floor((+d.slice(5, 7) - 1) / 3);
+  // 지금 보유 수량을 직전 분기 마지막 거래일 종가(원화)로 평가 — 분기 중 매매는 무시하는 근사
+  E.quarterStart = function (ctx, w, nav) {
+    const d = ctx.dates, q = E.quarterOf(d[ctx.n - 1]); let qi = ctx.n - 1;
+    while (qi > 0 && E.quarterOf(d[qi]) === q) qi--;
+    let v = 0;
+    for (const t in w) {
+      let g = 1; if (t !== CASH) { const r = E.krw(ctx, t); for (let i = qi + 1; i < ctx.n; i++) if (Number.isFinite(r[i])) g *= 1 + r[i]; }
+      v += w[t] * nav / g;
+    }
+    return { date: d[qi], value: v, chg: nav / v - 1 };
+  };
+  E.limitAmount = function (ctx, w, nav, L) {
+    if (L && L.mode === "pct") { const q = E.quarterStart(ctx, w, nav); return { amt: (L.pct || 0.2) * q.value, q }; }
+    return { amt: L.amount, q: null };
+  };
+  // 한도 초과(>105%) → 위험자산을 사용률 90%가 되도록 비율대로 줄여 SGOV로.
+  // 사용률 70% 미만이고 위험자산이 기본 비중보다 작으면 → 다시 늘릴 여유. (2018~2026 백테스트의 B 규칙)
+  E.limitAction = function (w, nav, util, k0, sleeve) {
+    const k = E.riskyShare(w); if (!(k > 0.01) || !Number.isFinite(util)) return null;
+    if (util > 1.05) {
+      const kNew = k * 0.9 / util, f = 1 - kNew / k, trades = {};
+      for (const t in w) if (!isSafe(t) && w[t] > 0) trades[t] = -w[t] * f * nav;
+      return { kind: "cut", k, kNew, amt: (k - kNew) * nav, trades };
+    }
+    if (util < 0.7 && k0 && k < k0 - 0.02) {
+      const kNew = Math.min(k0, k * 0.9 / util), trades = {};
+      const sl = sleeve || (() => { const o = {}; for (const t in w) if (!isSafe(t)) o[t] = w[t] / k; return o; })();
+      for (const t in sl) trades[t] = (sl[t] * kNew - (w[t] || 0)) * nav;
+      return { kind: "add", k, kNew, amt: (kNew - k) * nav, trades };
+    }
+    return null;
+  };
+  // 목표비중(전체 기준) → 위험자산 안 비율과 기본 위험자산 비중
+  E.sleeveOf = function (targets) {
+    if (!targets) return { sleeve: null, k0: null };
+    const k0 = E.riskyShare(targets), sleeve = {};
+    for (const t in targets) if (!isSafe(t) && targets[t] > 0) sleeve[t] = targets[t] / k0;
+    return { sleeve, k0 };
+  };
+
   E.diagnose = function (ctx, w, nav, set) {
-    set = Object.assign({ lam: 0.94, limit: { amount: 2e7, h: 252, c: 0.95, warn: 0.8 }, dupTh: 0.9, erp: 0.045 }, set || {});
+    set = Object.assign({ lam: 0.94, limit: { amount: 2e7, h: 252, c: 0.95, warn: 0.8 }, dupTh: 0.9, erp: 0.045, targets: null }, set || {});
     const mk = ctx.market, items = [];
     const V = E.var(ctx, w, nav, { lam: set.lam });
-    const lim = V.boot[set.limit.h][set.limit.c].amt, util = lim / set.limit.amount;
+    const LA = E.limitAmount(ctx, w, nav, set.limit), lim = V.boot[set.limit.h][set.limit.c].amt, util = lim / LA.amt;
+    const SL = E.sleeveOf(set.targets), act = E.limitAction(w, nav, util, SL.k0 || E.riskyShare(w), SL.sleeve);
     items.push({ key: "limit", label: "위험한도", level: util > 1 ? 2 : util > set.limit.warn ? 1 : 0,
-      text: `1년 95% VaR ${fmtW(lim)} = 한도 ${fmtW(set.limit.amount)}의 ${pct(util, 0)}`, value: util, th: 1 });
+      text: `1년 95% VaR ${fmtW(lim)} = 한도 ${fmtW(LA.amt)}${LA.q ? `(분기초 ${fmtW(LA.q.value)}의 ${pct(set.limit.pct, 0)})` : ""}의 ${pct(util, 0)}`
+        + (act ? (act.kind === "cut" ? ` → 위험자산 ${fmtW(act.amt)}를 SGOV로` : ` → 위험자산 ${fmtW(act.amt)} 다시 늘릴 여유`) : ""), value: util, th: 1 });
     const C = E.contrib(ctx, w, set.lam); let top = null;
     for (const t in C) if (t[0] !== "_" && (!top || C[t].ewma > C[top].ewma)) top = t;
     const tc = C[top].ewma;
@@ -485,7 +533,7 @@
     const weakW = weak.reduce((a, t) => a + w[t], 0);
     const lv = items.reduce((a, x) => a + x.level, 0), nRed = items.filter(x => x.level === 2).length;
     const verdict = nRed >= 2 || lv >= 5 ? "점검 필요" : lv >= 2 ? "보통" : "양호";
-    return { verdict, items, V, util, C, D, S, Ef, recent, weak, weakW };
+    return { verdict, items, V, util, limAmt: LA.amt, qStart: LA.q, limAct: act, riskyK: E.riskyShare(w), k0: SL.k0, C, D, S, Ef, recent, weak, weakW };
   };
 
   E.recommend = function (ctx, w, nav, diag, set) {
@@ -535,14 +583,17 @@
   E.simulate = function (ctx, w, rule, opt) {
     opt = Object.assign({ base: "KRW", days: 2520 }, opt || {});
     const { t, v } = wvec(w), { idx, cols } = panel(ctx, t, opt.base);
-    const use = idx.slice(-opt.days), bd = E.bands(w, rule);
+    const use = idx.slice(-opt.days), bd = E.bands(w, rule), sbd = rule.basis === "sleeve" ? E.bands(E.sleeveOf(w).sleeve || {}, rule) : null;
     let h = v.slice(), nav = 1, peak = 1, mdd = 0, nReb = 0, turn = 0;
     const r = new Float64Array(use.length);
     for (let k = 0; k < use.length; k++) {
       const i = use[k]; let tot = 0;
       for (let j = 0; j < t.length; j++) { h[j] *= 1 + cols[j][i]; tot += h[j]; }
       r[k] = tot / nav - 1; nav = tot; peak = Math.max(peak, nav); mdd = Math.min(mdd, nav / peak - 1);
-      let out = false; for (let j = 0; j < t.length; j++) if (Math.abs(h[j] / tot - v[j]) > bd[t[j]] + 1e-12) { out = true; break; }
+      let out = false;
+      if (rule.basis === "sleeve") { let hr = 0, vr = 0; for (let j = 0; j < t.length; j++) if (!isSafe(t[j])) { hr += h[j]; vr += v[j]; }
+        for (let j = 0; j < t.length; j++) if (!isSafe(t[j]) && Math.abs(h[j] / hr - v[j] / vr) > sbd[t[j]] + 1e-12) { out = true; break; } }
+      else for (let j = 0; j < t.length; j++) if (Math.abs(h[j] / tot - v[j]) > bd[t[j]] + 1e-12) { out = true; break; }
       const pe = periodEnd(ctx.dates[i], ctx.dates[use[k + 1]] || ctx.dates[i + 1], rule.freq);
       const go = rule.mode === "calendar" ? pe : rule.mode === "band" ? out : rule.mode === "both" ? (pe && out) : false;
       if (go) { let tv = 0; for (let j = 0; j < t.length; j++) { tv += Math.abs(h[j] / tot - v[j]); h[j] = tot * v[j]; } turn += tv / 2; nReb++; }
@@ -553,8 +604,8 @@
   };
   E.ruleCompare = function (ctx, w, rule) {
     const variants = [["none", "안 함 (바이앤홀드)", { mode: "none" }], ["cal", `정기 (${E.FREQ[rule.freq]})`, { mode: "calendar", freq: rule.freq }],
-      ["band", `허용범위 ±${(rule.abs * 100).toFixed(0)}%p${rule.rel > 0 ? "/" + (rule.rel * 100).toFixed(0) + "%" : ""}`, { mode: "band", abs: rule.abs, rel: rule.rel }],
-      ["both", `정기 점검(${E.FREQ[rule.freq]}) + 허용범위`, { mode: "both", freq: rule.freq, abs: rule.abs, rel: rule.rel }]];
+      ["band", `허용범위 ±${(rule.abs * 100).toFixed(0)}%p${rule.rel > 0 ? "/" + (rule.rel * 100).toFixed(0) + "%" : ""}`, { mode: "band", abs: rule.abs, rel: rule.rel, basis: rule.basis }],
+      ["both", `정기 점검(${E.FREQ[rule.freq]}) + 허용범위`, { mode: "both", freq: rule.freq, abs: rule.abs, rel: rule.rel, basis: rule.basis }]];
     return variants.map(([k, l, r]) => Object.assign({ key: k, label: l, mine: r.mode === rule.mode }, E.simulate(ctx, w, Object.assign({ freq: "Q", abs: 0.05, rel: 0.25 }, r))));
   };
   E.calendarDue = function (ctx, rule) {
@@ -573,7 +624,12 @@
     if (diag) {
       const u = diag.util;
       add("util:" + (u > 1 ? "over" : u > set.limit.warn ? "warn" : "ok"), u > 1 ? "critical" : u > set.limit.warn ? "warning" : "ok",
-        "위험한도", `1년 95% VaR 사용률 ${pct(u, 0)}`, u > 1 ? "한도 초과 중" : `한도까지 ${pct(1 - u, 0)}p 여유`, `위험한도 ${pct(u, 0)}`);
+        "위험한도", `1년 95% VaR 사용률 ${pct(u, 0)} (한도 ${fmtW(diag.limAmt || set.limit.amount)})`, u > 1 ? "한도 초과 중" : `한도까지 ${pct(1 - u, 0)}p 여유`, `위험한도 ${pct(u, 0)}`);
+      const la = diag.limAct;
+      if (la) add(`lim:${la.kind}`, la.kind === "cut" ? "critical" : "info", la.kind === "cut" ? "한도 축소" : "다시 늘리기",
+        la.kind === "cut" ? `위험자산 ${pct(la.k, 0)} → ${pct(la.kNew, 0)} (각 종목 같은 비율로 팔아 SGOV로)` : `사용률 ${pct(u, 0)} — 위험자산 ${pct(la.k, 0)} → ${pct(la.kNew, 0)}까지 늘려도 한도 90% 안`,
+        Object.entries(la.trades).filter(([, v]) => Math.abs(v) >= 1e4).map(([t, v]) => `${t} ${v > 0 ? "+" : "−"}${fmtW(Math.abs(v))}`).join(", "),
+        la.kind === "cut" ? `한도 초과 → 위험자산 ${fmtW(la.amt)} SGOV로` : `위험자산 ${fmtW(la.amt)} 늘릴 여유`);
       const pr = E.basketSeries(ctx, w, "KRW"), today = pr[ctx.n - 1];
       if (Number.isFinite(today)) add("move:" + (today <= -set.moveTh ? ctx.dates[ctx.n - 1] : "ok"), today <= -set.moveTh ? "warning" : "ok",
         "하루 변동", `${mk.meta.provisional ? "오늘(장중)" : ctx.dates[ctx.n - 1]} 포트폴리오 ${pct(today, 1)}`, `급락 기준 ${pct(-set.moveTh, 0)}까지 ${pp(today + set.moveTh)}`, `하루 ${pct(today, 1)}`);
@@ -585,11 +641,12 @@
       if (set.targets && rule.mode !== "none") {
         const cal = E.calendarDue(ctx, rule);
         if (cal) add(`cal:${cal.due ? cal.last : "no"}`, cal.due ? "info" : "ok", "정기 리밸런싱", cal.due ? `${E.FREQ[rule.freq]} 점검 시기 (기준일 ${cal.last})` : `최근 기준일 ${cal.last || "–"}`, cal.due ? "이번 주 점검" : "다음 기간 말에 점검", "정기 리밸런싱 시기");
-        const BD = E.bands(set.targets, rule);
-        for (const t of Object.keys(set.targets)) {
-          const tg = set.targets[t], cur = w[t] || 0, bd = BD[t], dv = cur - tg;
+        const sl = rule.basis === "sleeve" ? E.sleeveOf(set.targets).sleeve : null, k = E.riskyShare(w);
+        const TG = sl || set.targets, BD = E.bands(TG, rule), base = sl ? k * nav : nav, lab = sl ? " (위험자산 안)" : "";
+        for (const t of Object.keys(TG)) {
+          const tg = TG[t], cur = sl ? (k > 0 ? (w[t] || 0) / k : 0) : (w[t] || 0), bd = BD[t], dv = cur - tg;
           add(`band:${t}:${Math.abs(dv) > bd ? 1 : 0}`, Math.abs(dv) > bd ? "warning" : "ok", "리밸런싱",
-            `${t} ${pct(cur, 1)} (목표 ${pct(tg, 0)} ±${pct(bd, 1)})`, Math.abs(dv) > bd ? `${dv > 0 ? "매도" : "매수"} ${fmtW(Math.abs(dv) * nav)}` : `허용범위까지 ${pp(bd - Math.abs(dv))}`, `${t} ${dv > 0 ? "매도" : "매수"} ${fmtW(Math.abs(dv) * nav)}`);
+            `${t} ${pct(cur, 1)}${lab} (목표 ${pct(tg, 0)} ±${pct(bd, 1)})`, Math.abs(dv) > bd ? `${dv > 0 ? "매도" : "매수"} ${fmtW(Math.abs(dv) * base)}` : `허용범위까지 ${pp(bd - Math.abs(dv))}`, `${t} ${dv > 0 ? "매도" : "매수"} ${fmtW(Math.abs(dv) * base)}`);
         }
       }
       for (const t of Object.keys(w)) {

@@ -76,7 +76,7 @@ if (fs.existsSync("portfolio.enc.json") && PW) {
   catch (e) { log("보유내역 복호화 실패 — PORTFOLIO_PASSWORD가 앱에서 쓴 비밀번호와 같은지 확인"); }
 } else log(PW ? "portfolio.enc.json 없음 (앱 설정에서 동기화하세요)" : "PORTFOLIO_PASSWORD 미설정 — 카카오 토큰 자동 보관도 안 됩니다");
 
-const INTRADAY_OK = ["util", "move", "dd"]; // 장중에는 이 항목만 판단 (신호 전환은 종가 확정 후)
+const INTRADAY_OK = ["util", "move", "dd", "lim"]; // 장중에는 이 항목만 판단 (신호 전환은 종가 확정 후)
 const icon = { critical: "🔴", warning: "🟡", info: "🔵" };
 let fresh = [], gone = [], cur = {}, diag = null, W = null, set = null;
 
@@ -84,7 +84,7 @@ if (pf && pf.holdings && pf.holdings.length) {
   status.portfolio = true;
   const st = pf.settings || {};
   W = E.weights(ctx, pf.holdings, pf.cash || 0);
-  set = { lam: market.defaults.ewma_lambda, limit: Object.assign({ amount: 2e7, h: 252, c: 0.95, warn: 0.8 }, st.limit || {}), erp: st.erp || market.defaults.erp, dupTh: market.defaults.signals.dup_corr || 0.9 };
+  set = { lam: market.defaults.ewma_lambda, limit: Object.assign({ amount: 2e7, h: 252, c: 0.95, warn: 0.8, mode: "pct", pct: 0.2 }, st.limit || {}), targets: st.targets || null, erp: st.erp || market.defaults.erp, dupTh: market.defaults.signals.dup_corr || 0.9 };
   diag = E.diagnose(ctx, W.w, W.nav, set);
   const A = E.alerts(ctx, W.w, W.nav, diag, { limit: set.limit, targets: st.targets, ddWarn: st.ddWarn || [0.1, 0.2], moveTh: st.moveTh || 0.03, dupTh: set.dupTh, rule: st.rule });
   for (const a of A) if (a.level !== "ok") cur[a.key] = a;

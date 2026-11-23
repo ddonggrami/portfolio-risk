@@ -12,9 +12,9 @@ const LS = {
   set(k, v) { try { localStorage.setItem("pr." + k, JSON.stringify(v)); } catch (e) { } },
   del(k) { try { localStorage.removeItem("pr." + k); } catch (e) { } },
 };
-const DEF = { limit: { amount: 2e7, h: 252, c: 0.95, warn: 0.8 }, varMethod: "boot", erp: null, targets: null,
+const DEF = { limit: { amount: 2e7, h: 252, c: 0.95, warn: 0.8, mode: "pct", pct: 0.2 }, varMethod: "boot", erp: null, targets: null,
   fr: { method: "shrink", years: 5, maxW: 1, extra: [] }, repo: "", ddWarn: [0.10, 0.20], moveTh: 0.03,
-  rule: { mode: "band", freq: "Q", abs: 0.05, rel: 0.25 } };
+  rule: { mode: "band", freq: "Q", abs: 0.05, rel: 0.25, basis: "sleeve" } };
 const S = {
   holdings: LS.get("holdings", []), cash: LS.get("cash", 0), set: Object.assign({}, DEF, LS.get("settings", {})),
   token: LS.get("token", ""), view: "home", mkt: "rs", rsSel: null, mgSel: null, basket: null, frIdx: null, overlay: null,
@@ -80,10 +80,17 @@ const INFO = {
   "VaR": ["VaR 계산 방식", "주어진 기간·확률에서 '이 정도까지는 잃을 수 있다'는 경계입니다(최악의 손실 아님).",
     [["블록 부트스트랩", "최근 10년 일간 수익을 21일(1개월) 묶음으로 1만 번 재표본. 폭락이 몰려오는 성질을 보존."], ["EWMA", "최근 변동성(λ=0.94, 체감 약 1개월)이 계속된다고 가정. 위험이 커지는 걸 가장 빨리 반영."], ["역사적 250일", "최근 1년 실제 손익. 바젤 은행 규제 방식."],
      ["가정", "현재 비중이 그대로 유지된다고 가정합니다(리밸런싱 규칙은 아래 리밸런싱 카드에서 따로 비교)."]]],
+  "위험한도": ["위험한도 (B 방식)", "1년 95% VaR가 한도를 넘지 않도록 <b>위험자산의 크기</b>만 조절하고, 위험자산 <b>안의 비율</b>은 분기 리밸런싱이 맞춥니다.",
+    [["한도 금액", "기본: 분기 첫날 평가액의 20%. 분기마다 새로 잡힙니다(손실이 나면 다음 분기 한도도 같이 줄어듦). 고정 금액으로 바꿀 수도 있습니다."],
+     ["줄일 때", "사용률이 105%를 넘으면, 사용률이 90%가 되도록 모든 위험자산을 같은 비율로 팔아 SGOV로 옮깁니다. VaR는 위험자산 크기에 거의 비례하므로 이렇게 계산합니다."],
+     ["다시 늘릴 때", "사용률이 70% 아래로 내려오고 위험자산이 기본 비중(목표비중의 위험자산 합)보다 작으면, 90%가 되는 선까지 목표 비율대로 다시 삽니다."],
+     ["분기초 평가액", "지금 보유 수량을 직전 분기 마지막 거래일 종가(원화)로 계산한 값입니다. 분기 중에 매매했다면 약간 다를 수 있습니다."],
+     ["근거", "2018~2026 백테스트(원화): 연수익 19.8%, 변동성 16.7%, 최대낙폭 −25.9%. 그대로 보유는 25.9% / 30.1% / −51.5%."]]],
   "견고한 개선": ["견고한 개선", "과거 평균·축소 추정·시장 균형 <b>세 가지 기대수익 가정 모두</b>에서 샤프 비율이 좋아지는 변경안입니다. 수익 예측이 틀려도 개선될 가능성이 높습니다.", []],
   "리밸런싱": ["리밸런싱 규칙", "설정에서 고른 규칙에 따라 알림과 아래 비교표가 달라집니다.",
     [["정기", "주기 말마다 무조건 목표비중으로."], ["허용범위 이탈 시", "목표 ±절대 %p 또는 목표의 ±상대 % 중 좁은 쪽을 벗어나는 날 즉시. 국민연금 SAA 허용범위 방식."], ["정기 점검 + 허용범위", "주기 말에만 확인하고, 벗어났을 때만 매매. 매매 횟수가 가장 적음(Vanguard 권장 방식)."],
-     ["5/25 규칙", "±5%p 또는 목표의 ±25% 중 좁은 쪽. 작은 비중 종목에 ±5%p는 너무 넓기 때문."]]],
+     ["5/25 규칙", "±5%p 또는 목표의 ±25% 중 좁은 쪽. 작은 비중 종목에 ±5%p는 너무 넓기 때문."],
+     ["위험자산 안 비율 기준", "SGOV·현금을 뺀 위험자산끼리의 비율로 허용범위를 봅니다. 위험자산 전체 크기는 위험한도가 따로 조절하므로, 둘이 서로 부딪히지 않습니다."]]],
 };
 function ib(key) { return INFO[key.replace(/ .*년$/, "")] || key.startsWith("이력") ? `<button class="ib" data-info="${esc(key.startsWith("이력") ? "이력" : key)}" aria-label="${esc(key)} 설명"></button>` : ""; }
 INFO["이력"] = ["짧은 이력", "상장한 지 5년이 안 돼 위기 구간 데이터가 없습니다. 추천 후보에서는 제외하고 표에만 보여줍니다.", []];
@@ -139,7 +146,7 @@ function computePort() {
   const H = S.holdings.filter(h => h.t && h.shares > 0);
   const W = E.weights(S.ctx, H, +S.cash || 0);
   if (!Object.keys(W.w).length) { S.port = { W, empty: true }; return; }
-  const set = { lam: S.market.defaults.ewma_lambda, limit: S.set.limit, erp: S.set.erp, dupTh: S.market.defaults.signals.dup_corr || 0.9 };
+  const set = { lam: S.market.defaults.ewma_lambda, limit: S.set.limit, targets: S.set.targets, erp: S.set.erp, dupTh: S.market.defaults.signals.dup_corr || 0.9 };
   const diag = E.diagnose(S.ctx, W.w, W.nav, set);
   const alerts = E.alerts(S.ctx, W.w, W.nav, diag, { limit: S.set.limit, targets: S.set.targets, ddWarn: S.set.ddWarn, moveTh: S.set.moveTh, dupTh: set.dupTh, rule: S.set.rule });
   S.port = { W, diag, alerts, set };
@@ -246,19 +253,22 @@ function renderPort() {
       <div class="seg" id="varSeg">${[["boot", "블록 부트스트랩"], ["ewma", "EWMA(최근 변동성)"], ["hs250", "역사적 250일"]].map(([k, l]) => `<button data-k="${k}" class="${k === m ? "on" : ""}">${l}</button>`).join("")}</div>
       <p class="desc">${{ boot: `최근 ${V.years}년 일간 수익을 21일 블록으로 1만 번 재표본. 기대 초과수익 0 가정.`, ewma: "최근 변동성(λ=0.94, 체감 약 1개월)이 그대로 이어진다고 가정한 정규 근사.", hs250: "최근 250거래일 실제 손익. 10일은 √10 환산(바젤 관행)." }[m]}</p>
       ${table(["기간", "95% VaR", "99% VaR", "95% ES"], rows)}
-      <h3>위험한도: ${S.set.limit.h === 252 ? "1년" : S.set.limit.h + "일"} ${Math.round(S.set.limit.c * 100)}% VaR ≤ ${won(S.set.limit.amount)}</h3>
+      <h3>위험한도: ${S.set.limit.h === 252 ? "1년" : S.set.limit.h + "일"} ${Math.round(S.set.limit.c * 100)}% VaR ≤ ${won(d.limAmt)} ${ib("위험한도")}</h3>
+      ${d.qStart ? `<p class="note">분기초(${d.qStart.date}) 평가액 ${won(d.qStart.value)}의 ${pct(S.set.limit.pct, 0)} · 분기 들어 ${sg(d.qStart.chg)} · 위험자산 비중 ${pct(d.riskyK, 0)}${d.k0 ? ` (기본 ${pct(d.k0, 0)})` : ""}</p>` : ""}
       <div class="meter" role="img" aria-label="사용률 ${pct(util, 0)}"><i style="width:${Math.min(util, 1.5) / 1.5 * 100}%;background:var(${ucol})"></i><b style="left:${100 / 1.5}%"></b></div>
-      <div class="note">사용률 ${pct(util, 0)} (부트스트랩 기준) · 세로선 = 한도 100%</div></div>`;
+      <div class="note">사용률 ${pct(util, 0)} (부트스트랩 기준) · 세로선 = 한도 100%</div>${limActHtml(d)}</div>`;
     // 추천
     html += `<div class="card"><h2>지금 할 일</h2><p class="desc">예측이 잘 되는 위험(상관·변동성·중복 노출)을 근거로 고른 변경안. 기대수익 가정 세 가지 모두에서 샤프가 좋아지면 '견고한 개선'.</p><div id="recBox">${S.rec ? recHtml() : spin("편입·편출 효과 계산 중…")}</div></div>`;
     // 스트레스
     html += `<div class="card"><h2>과거 위기 재현 (현재 비중)</h2>${table(["위기", "유형", "원화", "달러", "S&P500"], d.S.map(s => [s.name, s.type, s.krw === null ? "데이터 없음" : sg(s.krw), sg(s.usd), sg(s.spy)]))}
       <p class="note">원화와 달러의 차이 = 환율 효과. 상장 전 구간은 비슷한 ETF로 이어 붙였습니다.</p></div>`;
     const rule = S.set.rule, tg = S.set.targets || null, tw = tg || Object.fromEntries(Object.entries(W.w));
-    const RC = E.ruleCompare(S.ctx, tw, rule), BD = E.bands(tw, rule);
+    const RC = E.ruleCompare(S.ctx, tw, rule), SLV = rule.basis === "sleeve" ? E.sleeveOf(tw).sleeve : null, TGV = SLV || tg, BD = TGV ? E.bands(TGV, rule) : {};
+    const kNow = E.riskyShare(W.w), curOf = t => SLV ? (kNow > 0 ? (W.w[t] || 0) / kNow : 0) : (W.w[t] || 0), baseV = SLV ? kNow * W.nav : W.nav;
     html += `<div class="card"><h2>리밸런싱 ${ib("리밸런싱")}</h2>
-      <p class="desc">현재 규칙: <b>${E.RULES[rule.mode]}</b>${rule.mode === "calendar" || rule.mode === "both" ? ` · ${E.FREQ[rule.freq]}` : ""}${rule.mode === "band" || rule.mode === "both" ? ` · ±${pct(rule.abs, 0)}p${rule.rel > 0 ? ` 또는 ±${pct(rule.rel, 0)} 중 좁은 쪽` : ""}` : ""} (설정에서 변경) · 목표비중: ${tg ? "설정됨" : "미설정 → 현재 비중을 목표로 가정"}</p>
-      ${tg ? table(["종목", "현재", "목표", "허용범위", "상태"], Object.keys(tg).map(t => { const c = W.w[t] || 0, dv = c - tg[t], out = Math.abs(dv) > BD[t]; return [t, pct(c), pct(tg[t], 0), `${pct(Math.max(0, tg[t] - BD[t]))} ~ ${pct(tg[t] + BD[t])}`, rule.mode === "none" ? "–" : out ? badge("warning", `${dv > 0 ? "매도" : "매수"} ${won(Math.abs(dv) * W.nav)}`) : '<span class="pill">유지</span>']; })) : ""}
+      <p class="desc">현재 규칙: <b>${E.RULES[rule.mode]}</b>${rule.mode === "calendar" || rule.mode === "both" ? ` · ${E.FREQ[rule.freq]}` : ""}${rule.mode === "band" || rule.mode === "both" ? ` · ±${pct(rule.abs, 0)}p${rule.rel > 0 ? ` 또는 ±${pct(rule.rel, 0)} 중 좁은 쪽` : ""}` : ""} ${SLV ? " · <b>위험자산 안 비율 기준</b>" : ""} (설정에서 변경) · 목표비중: ${tg ? "설정됨" : "미설정 → 현재 비중을 목표로 가정"}</p>
+      ${tg ? table(["종목", SLV ? "현재(위험자산 안)" : "현재", "목표", "허용범위", "상태"], Object.keys(TGV).map(t => { const c = curOf(t), g = TGV[t], dv = c - g, out = Math.abs(dv) > BD[t]; return [t, pct(c), pct(g, 0), `${pct(Math.max(0, g - BD[t]))} ~ ${pct(g + BD[t])}`, rule.mode === "none" ? "–" : out ? badge("warning", `${dv > 0 ? "매도" : "매수"} ${won(Math.abs(dv) * baseV)}`) : '<span class="pill">유지</span>']; })) : ""}
+      ${SLV ? `<p class="note">위험자산 전체 크기(지금 ${pct(kNow, 0)})는 위험한도가 조절하고, 여기서는 위험자산끼리의 비율만 맞춥니다.</p>` : ""}
       <h3>규칙별 과거 10년 비교 (원화, 목표비중으로 시작)</h3>
       ${table(["규칙", "연수익", "변동성", "최대낙폭", "매매 횟수/년", "회전율/년"], RC.map(r => [`${r.mine ? "<b>▶ " : ""}${esc(r.label)}${r.mine ? "</b>" : ""}`, pct(r.cagr), pct(r.vol), pct(r.mdd), num(r.rebPerYear, 1), pct(r.turnPerYear, 0)]))}
       <p class="note">${RC[0].from}부터 계산. 회전율이 높을수록 양도세(연 250만원 공제 후 22%)와 매매비용이 커집니다. VaR와 투자선은 '현재 비중 유지'를 가정합니다. 바이앤홀드로 10년 두면 비중이 ${Object.entries(RC[0].driftW).map(([k, v]) => `${k} ${pct(v, 0)}`).join(", ")}로 바뀝니다.</p></div>`;
@@ -268,6 +278,16 @@ function renderPort() {
   bindHoldings();
   const vs = $("#varSeg"); if (vs) vs.querySelectorAll("button").forEach(b => b.onclick = () => { S.set.varMethod = b.dataset.k; saveSet(); renderPort(); });
   bindRec();
+}
+function limActHtml(d) {
+  const a = d.limAct;
+  if (!a) return `<p class="note" style="margin-top:6px">조치 필요 없음 · 105% 넘으면 줄이고, 70% 아래면서 위험자산이 기본 비중보다 작으면 다시 늘립니다.</p>`;
+  const fx = S.market.meta.fx_now, lp = S.market.last_px;
+  const rows = Object.entries(a.trades).filter(([, v]) => Math.abs(v) >= 1e4).sort((x, y) => Math.abs(y[1]) - Math.abs(x[1]))
+    .map(([t, v]) => [t, `${v > 0 ? "매수" : "매도"} ${won(Math.abs(v))}`, lp[t] ? `약 ${Math.round(Math.abs(v) / (lp[t] * fx))}주` : "–"]);
+  if (lp.SGOV) rows.push(["SGOV", `${a.kind === "cut" ? "매수" : "매도"} ${won(a.amt)}`, `약 ${Math.round(a.amt / (lp.SGOV * fx))}주`]);
+  return `<div class="action" style="margin-top:10px"><div class="spread"><span class="h">${a.kind === "cut" ? "한도 초과 — 위험자산 줄이기" : "여유 생김 — 위험자산 다시 늘리기"}</span>${badge(a.kind === "cut" ? "critical" : "info", `${pct(a.k, 0)} → ${pct(a.kNew, 0)}`)}</div>
+    ${table(["종목", "매매", "주수"], rows)}<p class="note">${a.kind === "cut" ? "모든 위험자산을 같은 비율로 줄여 위험자산 안의 비율은 그대로 둡니다." : "목표비중의 위험자산 안 비율대로 삽니다."} 주수는 오늘 가격 기준 근사입니다.</p></div>`;
 }
 function recHtml() {
   const A = S.rec.actions; if (!A.length) return `<p class="desc">위험 측면에서 뚜렷하게 개선되는 변경안이 없습니다.</p>`;
@@ -570,15 +590,27 @@ async function syncUp(pw) {
   const content = btoa(unescape(encodeURIComponent(JSON.stringify(box))));
   await gh("/contents/portfolio.enc.json", { method: "PUT", body: JSON.stringify({ message: "update encrypted portfolio", content, sha }) });
 }
+// 설정을 바꾸면 알림 서버에도 자동 반영 (토큰과 비밀번호를 기억해 둔 경우)
+function autoSync(sel, msg) {
+  const m = $(sel), pw = LS.get("pw", "");
+  if (!(S.token && pw)) { if (m) m.textContent = msg + " · 카톡 알림에 반영하려면 아래에서 '암호화해서 올리기'"; return; }
+  if (m) m.innerHTML = msg + ' · <span class="spin"></span> 알림 서버에 올리는 중';
+  syncUp(pw).then(() => { const n = $(sel); if (n) n.textContent = msg + " · 알림 서버에도 반영됨"; })
+    .catch(e => { const n = $(sel); if (n) n.textContent = msg + " · 서버 반영 실패: " + (e.message || e); });
+}
 function renderSet() {
   const el = $("#v-set"), L = S.set.limit, ri = repoInfo();
-  el.innerHTML = `<div class="card"><h2>위험한도</h2>
-    <div class="row"><label class="small" style="width:100px">한도 금액(원)</label><input type="number" id="limA" value="${L.amount}" style="flex:1"></div>
+  el.innerHTML = `<div class="card"><h2>위험한도 ${ib("위험한도")}</h2>
+    <div class="row"><button class="btn primary" id="presetB">B 방식으로 한 번에 설정</button></div>
+    <p class="note">분기초 평가액의 20% 한도 + 분기 점검·5/25 허용범위(위험자산 안 비율 기준) + 현재 비중을 목표로 저장. 2018~2026 백테스트에서 고른 방식입니다.</p>
+    <div class="row" style="margin-top:8px"><label class="small" style="width:100px">한도 방식</label><select id="limM" style="flex:1"><option value="pct" ${L.mode === "pct" ? "selected" : ""}>분기초 평가액의 %</option><option value="amount" ${L.mode !== "pct" ? "selected" : ""}>고정 금액</option></select></div>
+    <div class="row" style="margin-top:6px"><label class="small" style="width:100px">분기초의</label><input type="number" step="1" id="limP" value="${((L.pct || 0.2) * 100).toFixed(0)}" style="width:80px">%<span class="note">'분기초 평가액의 %'일 때</span></div>
+    <div class="row" style="margin-top:6px"><label class="small" style="width:100px">고정 금액(원)</label><input type="number" id="limA" value="${L.amount}" style="flex:1"></div>
     <div class="row" style="margin-top:6px"><label class="small" style="width:100px">기준</label>
       <select id="limH">${E.HORIZONS.map(([h, l]) => `<option value="${h}" ${h === L.h ? "selected" : ""}>${l}</option>`).join("")}</select>
       <select id="limC">${[0.95, 0.99].map(c => `<option value="${c}" ${c === L.c ? "selected" : ""}>${c * 100}%</option>`).join("")}</select> VaR</div>
     <div class="row" style="margin-top:6px"><label class="small" style="width:100px">주의 구간</label><input type="number" id="limW" value="${L.warn * 100}" style="width:80px">% 이상</div>
-    <h3>리밸런싱 목표비중</h3><p class="desc">${S.set.targets ? Object.entries(S.set.targets).map(([t, v]) => `${t} ${pct(v, 0)}`).join(", ") : "설정 안 됨"} · 허용범위·주기는 아래 '리밸런싱 규칙'에서</p>
+    <h3>리밸런싱 목표비중</h3><p class="desc">${S.set.targets ? Object.entries(S.set.targets).map(([t, v]) => `${t} ${pct(v, 0)}`).join(", ") + ` · 위험자산 기본 비중 ${pct(E.riskyShare(S.set.targets), 0)}` : "설정 안 됨"} · 허용범위·주기는 아래 '리밸런싱 규칙'에서</p>
     <div class="row"><button class="btn" id="tgSet">현재 비중을 목표로 저장</button><button class="btn" id="tgClr">목표 해제</button></div>
     <h3>시장 균형 가정</h3><div class="row"><label class="small" style="width:100px">주식 위험프리미엄</label><input type="number" step="0.1" id="erp" value="${(S.set.erp * 100).toFixed(1)}" style="width:80px">%</div>
     <div class="row" style="margin-top:10px"><button class="btn primary" id="setSave">저장</button><span class="note" id="setMsg"></span></div></div>
@@ -586,7 +618,8 @@ function renderSet() {
     <div class="row"><label class="small" style="width:100px">방식</label><select id="rbMode" style="flex:1">${Object.entries(E.RULES).map(([k, l]) => `<option value="${k}" ${k === S.set.rule.mode ? "selected" : ""}>${l}</option>`).join("")}</select></div>
     <div class="row" style="margin-top:6px"><label class="small" style="width:100px">주기</label><select id="rbFreq">${Object.entries(E.FREQ).map(([k, l]) => `<option value="${k}" ${k === S.set.rule.freq ? "selected" : ""}>${l}</option>`).join("")}</select><span class="note">정기 방식에서 사용</span></div>
     <div class="row" style="margin-top:6px"><label class="small" style="width:100px">허용범위</label>±<input type="number" step="0.5" id="rbAbs" value="${(S.set.rule.abs * 100).toFixed(1)}" style="width:70px">%p 또는 목표의 ±<input type="number" step="1" id="rbRel" value="${(S.set.rule.rel * 100).toFixed(0)}" style="width:64px">%</div>
-    <p class="note">상대 %를 0으로 두면 절대 %p만 씁니다. 예: 5 / 25 → 5/25 규칙, 5 / 20 → 5/20 규칙.</p>
+    <div class="row" style="margin-top:6px"><label class="small" style="width:100px">비중 기준</label><select id="rbBasis" style="flex:1"><option value="sleeve" ${S.set.rule.basis !== "total" ? "selected" : ""}>위험자산 안 비율 (SGOV 제외)</option><option value="total" ${S.set.rule.basis === "total" ? "selected" : ""}>전체 비중</option></select></div>
+    <p class="note">상대 %를 0으로 두면 절대 %p만 씁니다. 예: 5 / 25 → 5/25 규칙, 5 / 20 → 5/20 규칙. 위험한도를 쓰면 '위험자산 안 비율'이 맞습니다.</p>
     <div class="row" style="margin-top:8px"><button class="btn primary" id="rbSave">저장</button><span class="note" id="rbMsg"></span></div></div>
   <div class="card"><h2>카톡 알림</h2><p class="desc">카카오톡 '나와의 채팅'으로 짧은 요약과 '앱에서 보기' 버튼이 옵니다. 신호가 생길 때 즉시, 일요일 아침엔 주간 요약.</p>
     <a class="btn primary" href="kakao.html" style="text-decoration:none;display:inline-block">카톡 알림 연결하기</a></div>
@@ -609,12 +642,18 @@ function renderSet() {
     <div class="row" style="margin-top:10px"><button class="btn" id="theme">다크/라이트 전환</button><button class="btn" id="wipe">이 기기 데이터 지우기</button></div>
     <p class="note">통계적 추정이며 투자 권유가 아닙니다.</p></div>`;
   $("#setSave").onclick = () => {
-    S.set.limit = { amount: +$("#limA").value, h: +$("#limH").value, c: +$("#limC").value, warn: +$("#limW").value / 100 };
-    S.set.erp = +$("#erp").value / 100; S.set.repo = $("#repo").value.trim(); saveSet(); computePort(); $("#setMsg").textContent = "저장됨"; renderHdr();
+    S.set.limit = { mode: $("#limM").value, pct: +$("#limP").value / 100, amount: +$("#limA").value, h: +$("#limH").value, c: +$("#limC").value, warn: +$("#limW").value / 100 };
+    S.set.erp = +$("#erp").value / 100; S.set.repo = $("#repo").value.trim(); saveSet(); computePort(); autoSync("#setMsg", "저장됨"); renderHdr();
   };
-  $("#rbSave").onclick = () => { S.set.rule = { mode: $("#rbMode").value, freq: $("#rbFreq").value, abs: +$("#rbAbs").value / 100, rel: +$("#rbRel").value / 100 }; saveSet(); computePort(); $("#rbMsg").textContent = "저장됨 · 알림과 비교표에 반영"; };
-  $("#tgSet").onclick = () => { if (!S.port || S.port.empty) return; S.set.targets = Object.assign({}, S.port.W.w); delete S.set.targets[E.CASH]; saveSet(); computePort(); renderSet(); };
-  $("#tgClr").onclick = () => { S.set.targets = null; saveSet(); computePort(); renderSet(); };
+  $("#rbSave").onclick = () => { S.set.rule = { mode: $("#rbMode").value, freq: $("#rbFreq").value, abs: +$("#rbAbs").value / 100, rel: +$("#rbRel").value / 100, basis: $("#rbBasis").value }; saveSet(); computePort(); autoSync("#rbMsg", "저장됨 · 알림과 비교표에 반영"); };
+  $("#presetB").onclick = () => {
+    S.set.limit = Object.assign({}, S.set.limit, { mode: "pct", pct: 0.2, h: 252, c: 0.95 });
+    S.set.rule = { mode: "both", freq: "Q", abs: 0.05, rel: 0.25, basis: "sleeve" };
+    if (S.port && !S.port.empty) { S.set.targets = Object.assign({}, S.port.W.w); delete S.set.targets[E.CASH]; }
+    saveSet(); computePort(); renderSet(); autoSync("#setMsg", "B 방식으로 설정됨" + (S.port && !S.port.empty ? " · 현재 비중을 목표로 저장" : " · 보유내역을 넣은 뒤 '현재 비중을 목표로 저장'을 눌러주세요"));
+  };
+  $("#tgSet").onclick = () => { if (!S.port || S.port.empty) return; S.set.targets = Object.assign({}, S.port.W.w); delete S.set.targets[E.CASH]; saveSet(); computePort(); renderSet(); autoSync("#setMsg", "목표 저장됨"); };
+  $("#tgClr").onclick = () => { S.set.targets = null; saveSet(); computePort(); renderSet(); autoSync("#setMsg", "목표 해제됨"); };
   $("#tokSave").onclick = () => { const v = $("#tok").value.trim(); if (v && !v.startsWith("•")) { S.token = v; LS.set("token", v); } S.set.repo = $("#repo").value.trim(); saveSet(); renderSet(); };
   $("#tokDel").onclick = () => { S.token = ""; LS.del("token"); renderSet(); };
   $("#syncB").onclick = async () => {
