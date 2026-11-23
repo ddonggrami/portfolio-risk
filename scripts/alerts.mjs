@@ -8,7 +8,7 @@ const require = createRequire(import.meta.url);
 const E = require("../app/engine.js");
 
 const SITE = process.env.SITE || "site";
-const KIND = process.env.RUN_KIND || "hourly"; // hourly | daily | weekly | manual
+const KIND = process.env.RUN_KIND || "hourly"; // hourly | daily | weekly | manual | deploy(앱 갱신만 — 알림을 보내지 않고 알림 상태도 그대로 둠)
 const PW = process.env.PORTFOLIO_PASSWORD || "";
 const APP_URL = process.env.DASHBOARD_URL || "";
 const log = (...a) => console.log("[alerts]", ...a);
@@ -87,13 +87,16 @@ if (pf && pf.holdings && pf.holdings.length) {
   set = { lam: market.defaults.ewma_lambda, limit: Object.assign({ amount: 2e7, h: 252, c: 0.95, warn: 0.8, mode: "pct", pct: 0.2 }, st.limit || {}), targets: st.targets || null, erp: st.erp || market.defaults.erp, dupTh: market.defaults.signals.dup_corr || 0.9 };
   diag = E.diagnose(ctx, W.w, W.nav, set);
   const A = E.alerts(ctx, W.w, W.nav, diag, { limit: set.limit, targets: st.targets, ddWarn: st.ddWarn || [0.1, 0.2], moveTh: st.moveTh || 0.03, dupTh: set.dupTh, rule: st.rule });
-  for (const a of A) if (a.level !== "ok") cur[a.key] = a;
+  // 상대강도는 검증상 예측력이 없어 앱에서만 보여주고 카톡으로는 보내지 않음
+  const PUSH_OFF = ["rs"];
+  for (const a of A) if (a.level !== "ok" && !PUSH_OFF.includes(a.key.split(":")[0])) cur[a.key] = a;
+  for (const k of Object.keys(state.keys)) if (PUSH_OFF.includes(k.split(":")[0])) delete state.keys[k];
   const cat = k => k.split(":")[0], consider = k => !prov || INTRADAY_OK.includes(cat(k));
   fresh = Object.values(cur).filter(a => consider(a.key) && !state.keys[a.key]);
   gone = Object.keys(state.keys).filter(k => consider(k) && !cur[k]).map(k => state.keys[k]);
   const nk = {}; for (const k in state.keys) if (!consider(k)) nk[k] = state.keys[k];
   for (const a of Object.values(cur)) if (consider(a.key)) nk[a.key] = a.short;
-  state.keys = nk;
+  if (KIND !== "deploy") state.keys = nk; // 배포 실행은 알림 상태를 건드리지 않음 → 다음 정기 점검이 변화를 그대로 알림
   log(`점검 완료: 경고 ${Object.keys(cur).length}건, 신규 ${fresh.length}, 해소 ${gone.length}`);
 }
 
@@ -110,7 +113,9 @@ function headline() {
 }
 const rg = market.regime;
 
-if (KIND === "weekly") {
+if (KIND === "deploy") {
+  log("배포 실행 — 알림 보내지 않음");
+} else if (KIND === "weekly") {
   let top = "";
   if (diag) { try { const R = E.recommend(ctx, W.w, W.nav, diag, set); if (R.actions[0]) top = `1순위: ${R.actions[0].title}`; } catch (e) { } }
   const warn = Object.values(cur).sort(sortLv).slice(0, 3).map(a => a.short).join(" · ");

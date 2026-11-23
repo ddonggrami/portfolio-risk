@@ -250,8 +250,8 @@
         for (let i = a; i <= b; i++) { let r = 0; for (let j = 0; j < t.length; j++) { const x = series(ctx, t[j], base)[i]; if (!Number.isFinite(x)) { ok = false; break; } r += v[j] * x; } if (!ok) break; g *= 1 + r; }
         res[base] = ok ? g - 1 : null;
       }
-      let gs = 1; for (let i = a; i <= b; i++) gs *= 1 + ctx.R.SPY[i];
-      return Object.assign({}, s, { krw: res.KRW, usd: res.USD, spy: gs - 1 });
+      let gs = 1, gk = 1; const sk = E.krw(ctx, "SPY"); for (let i = a; i <= b; i++) { gs *= 1 + ctx.R.SPY[i]; gk *= 1 + sk[i]; }
+      return Object.assign({}, s, { krw: res.KRW, usd: res.USD, spy: gs - 1, spy_krw: gk - 1 });
     });
   };
   E.drawdown = function (ctx, w, days) {
@@ -425,7 +425,7 @@
   function scenarioWeights(w, from, to, amt) { // from 비중 일부를 to 로
     const o = Object.assign({}, w);
     if (from === "*risky") {
-      const r = Object.keys(o).filter(t => t !== CASH && t !== "SGOV" && t !== to); const s = r.reduce((a, t) => a + o[t], 0);
+      const r = Object.keys(o).filter(t => !isSafe(t) && t !== to); const s = r.reduce((a, t) => a + o[t], 0);
       r.forEach(t => { o[t] -= amt * o[t] / s; });
     } else o[from] = Math.max(0, (o[from] || 0) - amt);
     o[to] = (o[to] || 0) + amt;
@@ -472,7 +472,12 @@
     return { date: d[qi], value: v, chg: nav / v - 1 };
   };
   E.limitAmount = function (ctx, w, nav, L) {
-    if (L && L.mode === "pct") { const q = E.quarterStart(ctx, w, nav); return { amt: (L.pct || 0.2) * q.value, q }; }
+    if (L && L.mode === "pct") {
+      // 이번 분기에 이미 기록해 둔 분기초 평가액이 있으면 그것을 씀 (분기 중에 보유내역을 바꿔도 한도가 흔들리지 않게)
+      const qn = E.quarterOf(ctx.dates[ctx.n - 1]), sn = L.qSnap;
+      const q = sn && sn.q === qn && sn.value > 0 ? { date: sn.date, value: sn.value, chg: nav / sn.value - 1, fixed: true, qn } : Object.assign(E.quarterStart(ctx, w, nav), { qn });
+      return { amt: (L.pct || 0.2) * q.value, q };
+    }
     return { amt: L.amount, q: null };
   };
   // 위험자산 크기 x 와 그 안의 비율 sleeve 로 만든 비중. 나머지 안전자산 몫은 dest(SGOV 또는 원화 현금)로
@@ -541,8 +546,9 @@
     if (d0) items.push({ key: "dup", label: "중복 노출", level: d0.c126 > set.dupTh ? 2 : d0.c126 > 0.8 ? 1 : 0,
       text: `${d0.a}–${d0.b} 6개월 상관 ${d0.c126.toFixed(2)} (합산 비중 ${pct(d0.w, 0)})`, value: d0.c126, th: set.dupTh });
     const S = E.stress(ctx, w), worst = S.filter(s => s.krw !== null).sort((a, b) => a.krw - b.krw)[0];
-    items.push({ key: "stress", label: "위기 방어", level: worst && worst.krw < worst.spy - 0.05 ? 2 : worst && worst.krw < worst.spy ? 1 : 0,
-      text: worst ? `가장 나쁜 위기: ${worst.name} ${pct(worst.krw, 1)} (같은 기간 S&P500 ${pct(worst.spy, 1)})` : "–", value: worst && worst.krw });
+    // 같은 통화끼리 비교 (원화 내 포트 vs 원화 S&P500)
+    items.push({ key: "stress", label: "위기 방어", level: worst && worst.krw < worst.spy_krw - 0.05 ? 2 : worst && worst.krw < worst.spy_krw ? 1 : 0,
+      text: worst ? `가장 나쁜 위기: ${worst.name} ${pct(worst.krw, 1)} (같은 기간 S&P500 원화 ${pct(worst.spy_krw, 1)})` : "–", value: worst && worst.krw });
     const Ef = E.efficiency(ctx, w, { erp: set.erp });
     const gaps = E.METHODS.map(([m]) => Ef.res[m].gap), nBad = gaps.filter(g => g > 0.01).length;
     items.push({ key: "eff", label: "투자선 효율", level: nBad === 3 ? 2 : nBad >= 2 ? 1 : 0,
@@ -564,7 +570,7 @@
 
   E.recommend = function (ctx, w, nav, diag, set) {
     set = Object.assign({ lam: 0.94, erp: 0.045, step: 0.10, dupTh: 0.9 }, set || {});
-    const mk = ctx.market, risky = Object.keys(w).filter(t => t !== CASH && t !== "SGOV");
+    const mk = ctx.market, risky = Object.keys(w).filter(t => !isSafe(t));
     const basket = {}; risky.forEach(t => { basket[t] = w[t]; });
     const cands = [...new Set([...mk.groups.candidates, ...mk.groups.runners])].filter(t => ctx.R[t] && !(t in w));
     const P = risky.length ? E.pairs(ctx, basket, cands, { lam: set.lam }) : [];
@@ -583,7 +589,8 @@
     // (2) 분산 후보 편입: 위험자산에서 비례 차감
     for (const p of goodPairs.slice(0, 3)) acts.push({ kind: "add", from: "*risky", to: p.t, amt: set.step, why: `${p.tags.join(", ") || "변동성 감소"} (6개월 상관 ${p.c126.toFixed(2)}, 하락장 상관 ${Number.isFinite(p.dn252) ? p.dn252.toFixed(2) : "–"})` });
     // (3) 위험한도 초과 시 SGOV 로 축소
-    if (diag.util > 1) { const k = 0.9 / diag.util; const a = risky.reduce((s, t) => s + w[t], 0) * (1 - k); acts.push({ kind: "derisk", from: "*risky", to: "SGOV", amt: a, why: `위험한도 사용률 ${pct(diag.util, 0)} → 90%` }); }
+    const la = diag.limAct;
+    if (la && la.kind === "cut" && la.reachable) acts.push({ kind: "derisk", from: "*risky", to: "SGOV", amt: la.k - la.kNew, why: `위험한도 사용률 ${pct(diag.util, 0)} → 90% (재편안 ①과 같은 크기)` });
     const seen = new Set(), out = [];
     for (const a of acts) {
       const key = a.from + ">" + a.to; if (seen.has(key)) continue; seen.add(key);
@@ -787,6 +794,21 @@
       ["both", `정기 점검(${E.FREQ[rule.freq]}) + 허용범위`, { mode: "both", freq: rule.freq, abs: rule.abs, rel: rule.rel, basis: rule.basis }]];
     return variants.map(([k, l, r]) => Object.assign({ key: k, label: l, mine: r.mode === rule.mode }, E.simulate(ctx, w, Object.assign({ freq: "Q", abs: 0.05, rel: 0.25 }, r))));
   };
+  E.nextPeriodEnd = function (d, freq) { const m = +d.slice(5, 7), st = { M: 1, Q: 3, S: 6, A: 12 }[freq] || 3; return `${Math.ceil(m / st) * st}월 말`; };
+  // 목표 대비 현재 상태와 '언제 매매하는지'를 규칙에 맞게 판정 (앱 표와 카톡 알림이 같이 씀)
+  E.rebalStatus = function (ctx, w, nav, targets, rule) {
+    if (!targets || !rule || rule.mode === "none") return null;
+    const sl = rule.basis === "sleeve" ? E.sleeveOf(targets).sleeve : null, k = E.riskyShare(w);
+    const TG = sl || targets, BD = E.bands(TG, rule), base = sl ? k * nav : nav, cal = E.calendarDue(ctx, rule);
+    const due = !!(cal && cal.due), next = E.nextPeriodEnd(ctx.dates[ctx.n - 1], rule.freq || "Q");
+    const rows = Object.keys(TG).map(t => {
+      const tg = TG[t], cur = sl ? (k > 0 ? (w[t] || 0) / k : 0) : (w[t] || 0), bd = BD[t], dv = cur - tg, out = Math.abs(dv) > bd;
+      // band: 벗어나면 즉시 / both: 기간 말에 벗어나 있을 때만 / calendar: 기간 말에 무조건 목표로
+      const act = rule.mode === "band" ? (out ? "now" : "none") : rule.mode === "both" ? (out ? (due ? "now" : "later") : "none") : (due && Math.abs(dv) > 0.005 ? "now" : "none");
+      return { t, tg, cur, bd, dv, out, act, amt: Math.abs(dv) * base, side: dv > 0 ? "매도" : "매수" };
+    });
+    return { rows, sleeve: !!sl, k, due, next, cal };
+  };
   E.calendarDue = function (ctx, rule) {
     if (rule.mode !== "calendar" && rule.mode !== "both") return null;
     const d = ctx.dates; let last = null;
@@ -817,15 +839,16 @@
       for (const d of diag.D.slice(0, 3)) add(`dup:${d.a}-${d.b}:${d.flag ? 1 : 0}`, d.flag ? "warning" : "ok", "중복 노출",
         `${d.a}–${d.b} 6개월 상관 ${d.c126.toFixed(2)}`, d.flag ? `기준(${set.dupTh}) 초과` : `기준까지 ${(set.dupTh - d.c126).toFixed(2)}`, `중복 ${d.a}·${d.b} ${d.c126.toFixed(2)}`);
       const rule = set.rule || { mode: "band", abs: set.band[0], rel: set.band[1], freq: "Q" };
-      if (set.targets && rule.mode !== "none") {
-        const cal = E.calendarDue(ctx, rule);
-        if (cal) add(`cal:${cal.due ? cal.last : "no"}`, cal.due ? "info" : "ok", "정기 리밸런싱", cal.due ? `${E.FREQ[rule.freq]} 점검 시기 (기준일 ${cal.last})` : `최근 기준일 ${cal.last || "–"}`, cal.due ? "이번 주 점검" : "다음 기간 말에 점검", "정기 리밸런싱 시기");
-        const sl = rule.basis === "sleeve" ? E.sleeveOf(set.targets).sleeve : null, k = E.riskyShare(w);
-        const TG = sl || set.targets, BD = E.bands(TG, rule), base = sl ? k * nav : nav, lab = sl ? " (위험자산 안)" : "";
-        for (const t of Object.keys(TG)) {
-          const tg = TG[t], cur = sl ? (k > 0 ? (w[t] || 0) / k : 0) : (w[t] || 0), bd = BD[t], dv = cur - tg;
-          add(`band:${t}:${Math.abs(dv) > bd ? 1 : 0}`, Math.abs(dv) > bd ? "warning" : "ok", "리밸런싱",
-            `${t} ${pct(cur, 1)}${lab} (목표 ${pct(tg, 0)} ±${pct(bd, 1)})`, Math.abs(dv) > bd ? `${dv > 0 ? "매도" : "매수"} ${fmtW(Math.abs(dv) * base)}` : `허용범위까지 ${pp(bd - Math.abs(dv))}`, `${t} ${dv > 0 ? "매도" : "매수"} ${fmtW(Math.abs(dv) * base)}`);
+      const RB = set.targets ? E.rebalStatus(ctx, w, nav, set.targets, rule) : null;
+      if (RB) {
+        const cal = RB.cal;
+        if (cal) add(`cal:${cal.due ? cal.last : "no"}`, cal.due ? "info" : "ok", "정기 리밸런싱", cal.due ? `${E.FREQ[rule.freq]} 점검 시기 (기준일 ${cal.last})` : `최근 기준일 ${cal.last || "–"}`, cal.due ? "이번 주 점검" : `다음 점검: ${RB.next}`, "정기 리밸런싱 시기");
+        const lab = RB.sleeve ? " (위험자산 안)" : "";
+        for (const r of RB.rows) {
+          const txt = `${r.t} ${pct(r.cur, 1)}${lab} (목표 ${pct(r.tg, 0)} ±${pct(r.bd, 1)})`;
+          if (r.act === "now") add(`band:${r.t}:2`, "warning", "리밸런싱", txt, `지금 ${r.side} ${fmtW(r.amt)}`, `${r.t} ${r.side} ${fmtW(r.amt)}`);
+          else if (r.act === "later") add(`band:${r.t}:1`, "info", "리밸런싱", txt, `허용범위 밖 — ${RB.next} 점검 때 ${r.side} (지금 기준 ${fmtW(r.amt)})`, `${r.t} 범위 밖(${RB.next} 처리)`);
+          else add(`band:${r.t}:0`, "ok", "리밸런싱", txt, r.out ? "허용범위 밖 — 정기 점검 때 목표로" : `허용범위까지 ${pp(r.bd - Math.abs(r.dv))}`, r.t);
         }
       }
       for (const t of Object.keys(w)) {
@@ -863,14 +886,37 @@
   function fmtW(x) { if (!Number.isFinite(x)) return "–"; const m = x / 1e4; return (Math.abs(m) >= 10000 ? (m / 1e4).toFixed(2) + "억" : Math.round(m).toLocaleString("ko-KR") + "만") + "원"; }
   E.fmt = { pct, pp, won: fmtW };
 
+  // 투자선 화면 한 번 그리는 데 필요한 계산 전부 (백그라운드에서). S&P500 은 항상 같은 가정·같은 창으로 함께 계산
+  E.frontierView = function (ctx, a) {
+    // 기대수익·공분산은 '목록 전체(꺼 둔 자산 포함) + S&P500'에서 한 번에 추정하고, 투자선은 켜 둔 자산만 골라 그림.
+    // → 자산을 넣고 빼도 다른 자산의 추정치·기간이 바뀌지 않아 투자선이 일관되게 움직임(넣으면 같거나 위로, 빼면 같거나 아래로)
+    const U = [...new Set([...(a.allTk || []), ...a.tk, "SPY"])], M = E.monthly(ctx, U, a.years);
+    if (M.rows.length < 24) return { short: true };
+    const idx = a.tk.map(t => U.indexOf(t)), si = U.indexOf("SPY");
+    const sub = e => ({ mu: idx.map(i => e.mu[i]), S: idx.map(i => idx.map(j => e.S[i][j])), rf: e.rf, shrink: e.shrink, phi: e.phi });
+    const exU = E.expected(M, a.method, a.erp), ex = sub(exU), fr = E.frontier(ex.mu, ex.S, { maxW: a.maxW, rf: ex.rf });
+    const cur = a.curW ? E.point(ex, a.tk, a.curW) : null;
+    const recPts = (a.recW || []).map(w => w ? E.point(ex, a.tk, w) : null);
+    const spy = { vol: Math.sqrt(exU.S[si][si]), ret: exU.mu[si] };
+    const auto = { vols: exU.S.map((r, i) => Math.sqrt(r[i])), mus: exU.mu, rf: exU.rf };
+    const meth = E.METHODS.map(([m, l]) => {
+      const e2 = sub(E.expected(M, m, a.erp)), f2 = E.frontier(e2.mu, e2.S, { maxW: a.maxW, rf: e2.rf }), c2 = a.curW ? E.point(e2, a.tk, a.curW) : null;
+      return { m, l, ms: { ret: f2.maxSharpe.ret, vol: f2.maxSharpe.vol, w: f2.maxSharpe.w }, gap: c2 ? E.retAtVol(f2, c2.vol) - c2.ret : null };
+    });
+    return { n: M.rows.length, from: M.labels[0], to: M.labels[M.labels.length - 1], mu: ex.mu, sd: ex.S.map((r, i) => Math.sqrt(r[i])), rf: ex.rf, shrink: ex.shrink, phi: ex.phi,
+      pts: fr.pts, maxSharpe: fr.maxSharpe, cur, recPts, spy, auto, meth };
+  };
+
   // ───────────────────────── 백그라운드 작업 (Web Worker 와 화면 쪽 대체 실행이 같이 씀) ─────────────────────────
   E.runJob = function (ctx, kind, a) {
     if (kind === "analyze") {
       const W = E.weights(ctx, a.H, a.cash);
       if (!Object.keys(W.w).length) return { W, empty: true };
-      const diag = E.diagnose(ctx, W.w, W.nav, a.set);
-      return { W, diag, alerts: E.alerts(ctx, W.w, W.nav, diag, a.alertSet) };
+      const diag = E.diagnose(ctx, W.w, W.nav, a.set), rule = a.alertSet.rule, tw = a.set.targets || W.w;
+      return { W, diag, alerts: E.alerts(ctx, W.w, W.nav, diag, a.alertSet), RC: rule ? E.ruleCompare(ctx, tw, rule) : null, RB: E.rebalStatus(ctx, W.w, W.nav, a.set.targets, rule) };
     }
+    if (kind === "pairs") return E.pairs(ctx, a.bw, a.cands, a.opt);
+    if (kind === "frontier") return E.frontierView(ctx, a);
     if (kind === "recommend") return E.recommend(ctx, a.w, a.nav, a.diag, a.set);
     if (kind === "plans") return E.limitPlans(ctx, a.H, a.cash, a.limAmt, a.opt);
     if (kind === "compare") return E.compareHoldings(ctx, a.H0, a.cash0, a.H1, a.cash1, a.opt);

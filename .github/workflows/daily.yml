@@ -32,7 +32,7 @@ jobs:
         id: kind
         run: |
           case "${{ github.event_name }}:${{ github.event.schedule }}" in
-            workflow_dispatch:*) case "${{ github.event.inputs.reason }}" in weekly) echo "kind=weekly" >> "$GITHUB_OUTPUT" ;; deploy) echo "kind=hourly" >> "$GITHUB_OUTPUT" ;; *) echo "kind=manual" >> "$GITHUB_OUTPUT" ;; esac ;;
+            workflow_dispatch:*) case "${{ github.event.inputs.reason }}" in weekly) echo "kind=weekly" >> "$GITHUB_OUTPUT" ;; deploy) echo "kind=deploy" >> "$GITHUB_OUTPUT" ;; *) echo "kind=manual" >> "$GITHUB_OUTPUT" ;; esac ;;
             "schedule:13 0 * * 0") echo "kind=weekly" >> "$GITHUB_OUTPUT" ;;
             "schedule:17 23 * * 1-5") echo "kind=daily" >> "$GITHUB_OUTPUT" ;;
             *) echo "kind=hourly" >> "$GITHUB_OUTPUT" ;;

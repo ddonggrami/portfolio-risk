@@ -82,14 +82,15 @@ const INFO = {
      ["가정", "현재 비중이 그대로 유지된다고 가정합니다(리밸런싱 규칙은 아래 리밸런싱 카드에서 따로 비교)."]]],
   "위험한도": ["위험한도 (B 방식)", "한도 기준 VaR(설정에서 고른 기간·신뢰수준)가 한도를 넘지 않도록 <b>위험자산의 크기</b>만 조절하고, 위험자산 <b>안의 비율</b>은 분기 리밸런싱이 맞춥니다.",
     [["한도 금액", "기본: 분기 첫날 평가액의 20%. 분기마다 새로 잡힙니다(손실이 나면 다음 분기 한도도 같이 줄어듦). 고정 금액으로 바꿀 수도 있습니다."],
-     ["줄일 때", "사용률이 105%를 넘으면, 사용률이 90%가 되도록 모든 위험자산을 같은 비율로 팔아 SGOV로 옮깁니다. VaR는 위험자산 크기에 거의 비례하므로 이렇게 계산합니다."],
+     ["줄일 때", "사용률이 105%를 넘으면, 위험자산 안의 목표 비율은 유지한 채 전체 크기를 줄여 사용률 90%가 되게 합니다. 줄일 크기는 실제 VaR를 다시 계산해서 찾습니다(SGOV도 원화로는 환율 위험이 있어 비례 계산이 맞지 않음). 100~105%는 매매비용을 고려해 대기."],
      ["다시 늘릴 때", "사용률이 70% 아래로 내려오고 위험자산이 기본 비중(목표비중의 위험자산 합)보다 작으면, 90%가 되는 선까지 목표 비율대로 다시 삽니다."],
-     ["분기초 평가액", "지금 보유 수량을 직전 분기 마지막 거래일 종가(원화)로 계산한 값입니다. 분기 중에 매매했다면 약간 다를 수 있습니다."],
-     ["근거", "2018~2026 백테스트(원화): 연수익 19.8%, 변동성 16.7%, 최대낙폭 −25.9%. 그대로 보유는 25.9% / 30.1% / −51.5%."]]],
+     ["분기초 평가액", "분기 들어 처음 계산할 때 '그때 보유 수량 × 직전 분기 마지막 거래일 종가(원화)'로 정하고, 그 분기 동안은 고정합니다. 분기 중에 매매해도 한도가 흔들리지 않습니다."],
+     ["근거 (백테스트)", "2018~2026, 원화. 1년 VaR ≤ 분기초 20%: 연수익 19.8%, 최대낙폭 −25.9%. 3개월 VaR ≤ 10%: 18.1% / −22.9%. 그대로 보유: 25.9% / −51.5%. 3개월 뒤 쓸 돈처럼 기간이 정해진 돈은 한도보다 미리 원화로 빼 두는 편이 확실합니다."]]],
   "한도 맞춤 재편안": ["한도 맞춤 재편안", "한도 기준 VaR(설정에서 고른 기간·신뢰수준) 사용률을 목표(기본 90%)까지 낮추는 방법을 세 가지로 계산합니다. 각 안은 정수 주로 맞춘 뒤 VaR를 다시 계산했습니다.",
-    [["① 같은 비율로 줄이기", "위험자산 안의 목표 비율은 그대로 두고 전체 크기만 줄여 SGOV로. 리밸런싱 규칙과 충돌이 없는 기본안."],
-     ["② 위험 큰 종목 위주", "1%p를 SGOV로 옮겼을 때 VaR가 가장 많이 줄어드는 종목부터 팝니다. 매매 건수가 적지만 목표 비율에서 벗어납니다."],
-     ["③ 다른 ETF 편입", "시장·후보 목록의 ETF(이력 5년 이상) 중, 일부(10~30%)를 편입하고 나머지 초과분만 SGOV로 옮겼을 때 균형 기대수익이 가장 높게 남는 조합. ①보다 나을 때만 표시합니다."],
+    [["목표 비율 그대로 줄이고 SGOV로", "위험자산 안의 목표 비율은 그대로 두고 전체 크기만 줄여 SGOV로. 리밸런싱 규칙과 충돌이 없는 기본안. 위험한도 문구의 '얼마어치 줄이기'도 이 계산입니다."],
+     ["목표 비율 그대로 줄이고 원화 현금으로", "판 돈을 SGOV 대신 원화(CMA·파킹통장 등)로 두는 안. SGOV는 원화 기준으로 환율 위험이 있지만 원화 현금은 없어서, 같은 한도에서 덜 팔아도 됩니다. 대신 환전 비용과, 다시 살 때 환율이 달라지는 위험이 있습니다."],
+     ["위험기여 큰 종목 위주로", "1%p를 SGOV로 옮겼을 때 VaR가 가장 많이 줄어드는 종목부터 팝니다. 매매 건수가 적지만 목표 비율에서 벗어납니다."],
+     ["다른 ETF 새로 편입", "시장·후보 목록의 ETF(이력 5년 이상) 중, 일부(10~30%)를 편입하고 나머지 초과분만 SGOV로 옮겼을 때 균형 기대수익이 가장 높게 남는 조합. 첫 번째 안보다 나을 때만 표시합니다."],
      ["주의", "VaR는 최근 10년 표본 기준입니다. 채권처럼 과거에 주식과 반대로 움직였던 자산은 그 관계가 바뀌면(2022년처럼) 효과가 줄어듭니다."]]],
   "균형 기대수익": ["균형 기대수익", "각 ETF의 S&P500 대비 베타 × 주식 위험프리미엄 + 무위험금리(최근 5년 월간). 최근 성과를 따라가지 않는 중립적인 기준으로, 재편안끼리 '수익 여지를 얼마나 남겼는지' 비교하는 용도입니다. 예측이 아닙니다.", []],
   "견고한 개선": ["견고한 개선", "과거 평균·축소 추정·시장 균형 <b>세 가지 기대수익 가정 모두</b>에서 샤프 비율이 좋아지는 변경안입니다. 수익 예측이 틀려도 개선될 가능성이 높습니다.", []],
@@ -197,15 +198,21 @@ function computePort() {
   refreshPort(); if (S.view === "home") renderHome();
   return job("analyze", { H, cash, set, alertSet }).then(r => {
     if (seq !== S.portSeq) return;
-    S.port = r.empty ? { W: r.W, empty: true } : { W: r.W, diag: r.diag, alerts: r.alerts, set };
+    S.port = r.empty ? { W: r.W, empty: true } : { W: r.W, diag: r.diag, alerts: r.alerts, set, RC: r.RC, RB: r.RB };
     busyOff("port"); refreshPort(); if (S.view === "home") renderHome();
     if (r.empty) return;
+    // 분기초 평가액을 이번 분기 동안 고정 (처음 계산한 값을 저장하고 알림 서버에도 올림)
+    const q = r.diag.qStart;
+    if (S.set.limit.mode === "pct" && q && !q.fixed) {
+      S.set.limit.qSnap = { q: q.qn, date: q.date, value: Math.round(q.value) }; saveSet();
+      const pw = LS.get("pw", ""); if (S.token && pw) syncUp(pw).catch(() => { });
+    }
     busyOn("rec", "추천·재편안 계산 중… 화면은 계속 쓰셔도 됩니다");
     const jobs = [job("recommend", { w: r.W.w, nav: r.W.nav, diag: r.diag, set }).then(x => {
       if (seq !== S.portSeq) return; S.rec = x; refreshPort(); if (S.view === "home") renderHome(); if (S.view === "fr") renderFr();
     })];
     if (r.diag.util > 1) jobs.push(calcPlans(S.planTarget || 0.9, true, seq));
-    return Promise.all(jobs).catch(e => { S.jobErr = String(e.message || e); }).finally(() => busyOff("rec"));
+    return Promise.all(jobs).catch(e => { if (seq !== S.portSeq) return; if (!S.rec) S.rec = { actions: [], error: String(e.message || e) }; refreshPort(); if (S.view === "home") renderHome(); }).finally(() => busyOff("rec"));
   }).catch(e => {
     if (seq !== S.portSeq) return;
     busyOff("port"); S.port = { W, error: String(e.message || e) }; refreshPort();
@@ -256,13 +263,13 @@ function renderHome() {
   else if (portReady()) {
     const d = S.port.diag, vl = { "양호": "ok", "보통": "warning", "점검 필요": "critical" }[d.verdict];
     html += `<div class="card"><div class="spread"><h2>내 포트폴리오 진단</h2>${badge(vl, d.verdict)}</div>
-      <p class="desc">총 ${won(S.port.W.nav)} · 위험 쪽 5개 항목 종합</p>
+      <p class="desc">총 ${won(S.port.W.nav)} · 위험 쪽 ${d.items.length}개 항목 종합</p>
       ${d.items.map(i => `<div class="alert">${badge(["ok", "warning", "critical"][i.level], i.label)}<div class="t">${esc(i.text)}</div></div>`).join("")}
-      <div style="margin-top:8px">${S.rec ? (S.rec.actions[0] ? `<b>지금 할 일 1순위:</b> ${esc(S.rec.actions[0].title)} — 변동성 ${sgp(S.rec.actions[0].dVolEwma)}, ${E.limLabel(S.set.limit)} ${won(S.rec.actions[0].varL0)} → ${won(S.rec.actions[0].varL1)}` : "추천할 변경 없음") : '<span class="spin"></span> 추천 계산 중'}
+      <div style="margin-top:8px">${S.rec && S.rec.error ? `추천 계산 실패: ${esc(S.rec.error)}` : S.rec ? (S.rec.actions[0] ? `<b>지금 할 일 1순위:</b> ${esc(S.rec.actions[0].title)} — 변동성 ${sgp(S.rec.actions[0].dVolEwma)}, ${E.limLabel(S.set.limit)} ${won(S.rec.actions[0].varL0)} → ${won(S.rec.actions[0].varL1)}` : "추천할 변경 없음") : '<span class="spin"></span> 추천 계산 중'}
       <button class="btn" style="margin-left:6px" data-go="port">자세히</button></div></div>`;
     const A = S.port.alerts, act = A.filter(a => a.level !== "ok");
     html += `<div class="card"><h2>알림 상태</h2><p class="desc">알림이 없다면 아래 항목이 모두 기준 안에 있다는 뜻입니다. 오른쪽은 기준까지 남은 거리입니다.</p>
-      ${(act.length ? act : []).concat(A.filter(a => a.level === "ok")).map(a => `<div class="alert">${badge(a.level, a.label)}${ib({ "중복 노출": "중복 노출", "상대강도(참고)": "상대강도", "리밸런싱": "리밸런싱", "정기 리밸런싱": "리밸런싱", "위험한도": "VaR" }[a.label] || "")}<div class="t">${esc(a.text)}<div class="d">${esc(a.dist || "")}</div></div></div>`).join("")}</div>`;
+      ${(act.length ? act : []).concat(A.filter(a => a.level === "ok")).map(a => `<div class="alert">${badge(a.level, a.label)}${ib({ "중복 노출": "중복 노출", "상대강도(참고)": "상대강도", "리밸런싱": "리밸런싱", "정기 리밸런싱": "리밸런싱", "위험한도": "위험한도", "한도 축소": "한도 맞춤 재편안", "다시 늘리기": "위험한도" }[a.label] || "")}<div class="t">${esc(a.text)}<div class="d">${esc(a.dist || "")}</div></div></div>`).join("")}</div>`;
   } else {
     html += `<div class="card"><h2>내 포트폴리오</h2><p class="desc">보유 ETF와 주수를 입력하면 진단, VaR, 편입·편출 제안, 알림 상태가 여기에 표시됩니다. 입력한 내용은 이 휴대폰에만 저장됩니다.</p><button class="btn primary" data-go="port">보유내역 입력</button></div>`;
   }
@@ -284,7 +291,7 @@ function holdingsEditor() {
   const src = S.hDraft || S.holdings;
   const rows = (src.length ? src : [{ t: "", shares: "" }]).map((h, i) =>
     `<div class="hold-row"><input list="tk" placeholder="티커 (예: SPMO)" value="${esc(h.t)}" data-k="t" data-i="${i}" autocapitalize="characters"><input type="number" inputmode="decimal" placeholder="주수" value="${h.shares}" data-k="shares" data-i="${i}"><button class="btn" data-del="${i}">삭제</button></div>`).join("");
-  return `<div class="card"><h2>보유내역</h2><p class="desc">ETF·종목과 보유 주수. 이 휴대폰에만 저장되며, 텔레그램 알림을 원하면 설정에서 암호화 동기화를 켜세요.</p>
+  return `<div class="card"><h2>보유내역</h2><p class="desc">ETF·종목과 보유 주수. 이 휴대폰에 저장되고, 설정에서 동기화를 켜 두면 암호화해서 카톡 알림 서버에도 올라갑니다.</p>
     <datalist id="tk">${opts}</datalist><div id="hrows">${rows}</div>
     <div class="row"><button class="btn" id="addRow">+ 종목 추가</button></div>
     <div class="row" style="margin-top:8px"><label class="small">원화 현금</label><input type="number" inputmode="numeric" id="cash" value="${S.cashDraft !== undefined ? S.cashDraft : (S.cash || "")}" placeholder="0" style="flex:1"></div>
@@ -318,35 +325,36 @@ function renderPort() {
     // 보유 현황
     const tk = Object.keys(W.w).sort((a, b) => W.w[b] - W.w[a]);
     html += `<div class="card"><h2>보유 현황</h2><p class="desc">총 ${won(W.nav)} · 위험기여 = 그 종목이 포트폴리오 변동성에서 차지하는 몫 (EWMA ≈ 최근 1개월 / 3년)</p>
-      ${table(["종목", "평가액", "비중", "위험기여(최근)", "위험기여(3년)", "연변동성(최근)", "상대강도"], tk.map(t => [t, won(W.values[t]), pct(W.w[t]), C[t] ? pct(C[t].ewma) : "–", C[t] ? pct(C[t].y3) : "–", C[t] ? pct(C[t].ewma_vol) : "–", S.market.rs[t] ? badge(stateLevel(S.market.rs[t].state), S.market.rs[t].state) : "–"]))}</div>`;
+      ${table(["종목", "비중", "위험기여<div class=\"note\">최근 / 3년</div>", "연변동성<div class=\"note\">최근</div>"], tk.map(t => [`<b>${esc(t)}</b>${S.market.rs[t] ? `<div class="note">상대강도 ${esc(S.market.rs[t].state)}</div>` : ""}`, `${pct(W.w[t])}<div class="note">${won(W.values[t])}</div>`, C[t] ? `${pct(C[t].ewma)}<div class="note">${pct(C[t].y3)}</div>` : "–", C[t] ? pct(C[t].ewma_vol) : "–"]))}</div>`;
     // VaR
     const util = d.util, ucol = util > 1 ? "--crit" : util > S.set.limit.warn ? "--warn" : "--good";
-    const rows = E.HORIZONS.map(([h, lab]) => { const r = V[m][h]; if (!r) return null; const LH = E.limHC(S.set.limit), mark = c => h === LH.h && c === LH.c ? ' style="color:var(--accent);font-weight:700"' : "";
-      return [h === LH.h ? `<b>${lab}</b> <span class="pill">한도 기준</span>` : lab, `<span${mark(0.95)}>${won(r[0.95].amt)}</span><br><span class="note">${pct(r[0.95].pct)}</span>`, `<span${mark(0.99)}>${won(r[0.99].amt)}</span><br><span class="note">${pct(r[0.99].pct)}</span>`, `${won(r[0.95].es_amt)}`]; }).filter(Boolean);
+    const rows = E.HORIZONS.map(([h, lab]) => { const r = V[m][h]; if (!r) return null; const LH = E.limHC(S.set.limit), isB = m === "boot", mark = c => isB && h === LH.h && c === LH.c ? ' style="color:var(--accent);font-weight:700"' : "";
+      return [isB && h === LH.h ? `<b>${lab}</b> <span class="pill">한도 기준</span>` : lab, `<span${mark(0.95)}>${won(r[0.95].amt)}</span><br><span class="note">${pct(r[0.95].pct)}</span>`, `<span${mark(0.99)}>${won(r[0.99].amt)}</span><br><span class="note">${pct(r[0.99].pct)}</span>`, `${won(r[0.95].es_amt)}`]; }).filter(Boolean);
     html += `<div class="card"><h2>VaR (원화 기준, 환율 위험 포함) ${ib("VaR")}</h2>
       <div class="seg" id="varSeg">${[["boot", "블록 부트스트랩"], ["ewma", "EWMA(최근 변동성)"], ["hs250", "역사적 250일"]].map(([k, l]) => `<button data-k="${k}" class="${k === m ? "on" : ""}">${l}</button>`).join("")}</div>
       <p class="desc">${{ boot: `최근 ${V.years}년 일간 수익을 21일 블록으로 1만 번 재표본. 기대 초과수익 0 가정.`, ewma: "최근 변동성(λ=0.94, 체감 약 1개월)이 그대로 이어진다고 가정한 정규 근사.", hs250: "최근 250거래일 실제 손익. 10일은 √10 환산(바젤 관행)." }[m]}</p>
       ${table(["기간", "95% VaR", "99% VaR", "95% ES"], rows)}
+      ${m !== "boot" ? `<p class="note">한도 사용률은 항상 블록 부트스트랩 값(${E.limLabel(S.set.limit)} ${won(V.boot[E.limHC(S.set.limit).h][E.limHC(S.set.limit).c].amt)})으로 계산합니다. 이 표는 비교용입니다.</p>` : ""}
       <h3>위험한도: ${E.limLabel(S.set.limit)} ≤ ${won(d.limAmt)} ${ib("위험한도")}</h3>
-      ${d.qStart ? `<p class="note">분기초(${d.qStart.date}) 평가액 ${won(d.qStart.value)}의 ${pct(S.set.limit.pct, 0)} · 분기 들어 ${sg(d.qStart.chg)} · 위험자산 비중 ${pct(d.riskyK, 0)}${d.k0 ? ` (기본 ${pct(d.k0, 0)})` : ""}</p>` : ""}
+      ${d.qStart ? `<p class="note">분기초(${d.qStart.date}) 평가액 ${won(d.qStart.value)}${d.qStart.fixed ? "(이번 분기 고정)" : ""}의 ${pct(S.set.limit.pct, 0)} · 분기 들어 ${sg(d.qStart.chg)} · 위험자산 비중 ${pct(d.riskyK, 0)}${d.k0 ? ` (기본 ${pct(d.k0, 0)})` : ""}</p>` : ""}
       <div class="meter" role="img" aria-label="사용률 ${pct(util, 0)}"><i style="width:${Math.min(util, 1.5) / 1.5 * 100}%;background:var(${ucol})"></i><b style="left:${100 / 1.5}%"></b></div>
       <div class="note">사용률 ${pct(util, 0)} (부트스트랩 기준) · 세로선 = 한도 100%</div>${limActHtml(d)}</div>`;
     html += plansCard(d) + simCard();
     // 추천
-    html += `<div class="card"><h2>지금 할 일</h2><p class="desc">예측이 잘 되는 위험(상관·변동성·중복 노출)을 근거로 고른 변경안. 기대수익 가정 세 가지 모두에서 샤프가 좋아지면 '견고한 개선'.</p><div id="recBox">${S.rec ? recHtml() : spin("편입·편출 효과 계산 중…")}</div></div>`;
+    html += `<div class="card"><h2>지금 할 일</h2><p class="desc">예측이 잘 되는 위험(상관·변동성·중복 노출)을 근거로 고른 변경안. 기대수익 가정 세 가지 모두에서 샤프가 좋아지면 '견고한 개선'.</p><div id="recBox">${S.rec && S.rec.error ? `<p class="desc">추천 계산 실패: ${esc(S.rec.error)}</p>` : S.rec ? recHtml() : spin("편입·편출 효과 계산 중…")}</div></div>`;
     // 스트레스
-    html += `<div class="card"><h2>과거 위기 재현 (현재 비중)</h2>${table(["위기", "유형", "원화", "달러", "S&P500"], d.S.map(s => [s.name, s.type, s.krw === null ? "데이터 없음" : sg(s.krw), sg(s.usd), sg(s.spy)]))}
-      <p class="note">원화와 달러의 차이 = 환율 효과. 상장 전 구간은 비슷한 ETF로 이어 붙였습니다.</p></div>`;
-    const rule = S.set.rule, tg = S.set.targets || null, tw = tg || Object.fromEntries(Object.entries(W.w));
-    const RC = E.ruleCompare(S.ctx, tw, rule), SLV = rule.basis === "sleeve" ? E.sleeveOf(tw).sleeve : null, TGV = SLV || tg, BD = TGV ? E.bands(TGV, rule) : {};
-    const kNow = E.riskyShare(W.w), curOf = t => SLV ? (kNow > 0 ? (W.w[t] || 0) / kNow : 0) : (W.w[t] || 0), baseV = SLV ? kNow * W.nav : W.nav;
+    html += `<div class="card"><h2>과거 위기 재현 (현재 비중)</h2>${table(["위기", "내 포트<div class=\"note\">원화 / 달러</div>", "S&P500<div class=\"note\">원화 / 달러</div>"], d.S.map(s => [`${esc(s.name)}<div class="note">${esc(s.type)}</div>`, `${s.krw === null ? "–" : sg(s.krw)}<div class="note">${sg(s.usd)}</div>`, `${sg(s.spy_krw)}<div class="note">${sg(s.spy)}</div>`]))}
+      <p class="note">위 줄 원화, 아래 줄 달러. 같은 통화끼리 비교하세요. 원화와 달러의 차이 = 환율 효과(위기 때 원화 약세로 달러 자산의 원화 손실이 줄어드는 경우가 많음). 상장 전 구간은 비슷한 ETF로 이어 붙였습니다.</p></div>`;
+    const rule = S.set.rule, tg = S.set.targets || null, RC = P.RC || [], RB = P.RB, SLV = rule.basis === "sleeve", kNow = E.riskyShare(W.w);
+    const st = r => r.act === "now" ? badge("warning", `지금 ${r.side} ${won(r.amt)}`) : r.act === "later" ? badge("info", `${RB.next} 점검 때 ${r.side}`) + `<div class="note">지금 기준 ${won(r.amt)}</div>` : r.out ? '<span class="pill">범위 밖 · 정기 점검 때</span>' : '<span class="pill">유지</span>';
     html += `<div class="card"><h2>리밸런싱 ${ib("리밸런싱")}</h2>
       <p class="desc">현재 규칙: <b>${E.RULES[rule.mode]}</b>${rule.mode === "calendar" || rule.mode === "both" ? ` · ${E.FREQ[rule.freq]}` : ""}${rule.mode === "band" || rule.mode === "both" ? ` · ±${pct(rule.abs, 0)}p${rule.rel > 0 ? ` 또는 ±${pct(rule.rel, 0)} 중 좁은 쪽` : ""}` : ""} ${SLV ? " · <b>위험자산 안 비율 기준</b>" : ""} (설정에서 변경) · 목표비중: ${tg ? "설정됨" : "미설정 → 현재 비중을 목표로 가정"}</p>
-      ${tg ? table(["종목", SLV ? "현재(위험자산 안)" : "현재", "목표", "허용범위", "상태"], Object.keys(TGV).map(t => { const c = curOf(t), g = TGV[t], dv = c - g, out = Math.abs(dv) > BD[t]; return [t, pct(c), pct(g, 0), `${pct(Math.max(0, g - BD[t]))} ~ ${pct(g + BD[t])}`, rule.mode === "none" ? "–" : out ? badge("warning", `${dv > 0 ? "매도" : "매수"} ${won(Math.abs(dv) * baseV)}`) : '<span class="pill">유지</span>']; })) : ""}
+      ${tg && RB ? table(["종목", SLV ? "현재<div class=\"note\">위험자산 안</div>" : "현재", "목표 (허용범위)", "상태"], RB.rows.map(r => [r.t, pct(r.cur), `${pct(r.tg, 0)}<div class="note">${pct(Math.max(0, r.tg - r.bd))}~${pct(r.tg + r.bd)}</div>`, st(r)])) : ""}
+      ${tg && RB && rule.mode !== "band" ? `<p class="note">${rule.mode === "both" ? `정기 점검 방식이라 허용범위를 벗어나도 ${RB.next} 점검 때 벗어나 있을 때만 매매합니다.` : `정기 방식이라 ${RB.next}에 목표비중으로 맞춥니다.`}${RB.due ? " 지금이 점검 시기입니다." : ""}</p>` : ""}
       ${SLV ? `<p class="note">위험자산 전체 크기(지금 ${pct(kNow, 0)})는 위험한도가 조절하고, 여기서는 위험자산끼리의 비율만 맞춥니다.</p>` : ""}
       <h3>규칙별 과거 10년 비교 (원화, 목표비중으로 시작)</h3>
-      ${table(["규칙", "연수익", "변동성", "최대낙폭", "매매 횟수/년", "회전율/년"], RC.map(r => [`${r.mine ? "<b>▶ " : ""}${esc(r.label)}${r.mine ? "</b>" : ""}`, pct(r.cagr), pct(r.vol), pct(r.mdd), num(r.rebPerYear, 1), pct(r.turnPerYear, 0)]))}
-      <p class="note">${RC[0].from}부터 계산. 회전율이 높을수록 양도세(연 250만원 공제 후 22%)와 매매비용이 커집니다. VaR와 투자선은 '현재 비중 유지'를 가정합니다. 바이앤홀드로 10년 두면 비중이 ${Object.entries(RC[0].driftW).map(([k, v]) => `${k} ${pct(v, 0)}`).join(", ")}로 바뀝니다.</p></div>`;
+      ${RC.length ? table(["규칙", "연수익", "변동성", "최대낙폭", "매매 횟수/년", "회전율/년"], RC.map(r => [`${r.mine ? "<b>▶ " : ""}${esc(r.label)}${r.mine ? "</b>" : ""}`, pct(r.cagr), pct(r.vol), pct(r.mdd), num(r.rebPerYear, 1), pct(r.turnPerYear, 0)])) : ""}
+      <p class="note">${RC.length ? RC[0].from : "–"}부터 계산. 회전율이 높을수록 양도세(연 250만원 공제 후 22%)와 매매비용이 커집니다. VaR와 투자선은 '현재 비중 유지'를 가정합니다. ${RC.length ? `바이앤홀드로 10년 두면 비중이 ${Object.entries(RC[0].driftW).map(([k, v]) => `${k} ${pct(v, 0)}`).join(", ")}로 바뀝니다.` : ""} 위험한도에 따른 크기 조절은 이 비교에 들어 있지 않습니다.</p></div>`;
     html += `<div class="card"><h2>보유 종목 간 상관 (중복 노출) ${ib("중복 노출")}</h2>${table(["쌍", "3개월", "6개월", "12개월"], d.D.map(x => [`${x.a}–${x.b}`, num(x.c63), num(x.c126), num(x.c252)]))}<p class="note">6개월 상관 ${S.market.defaults.signals.dup_corr || 0.9} 초과 = 같은 위험을 두 번 지는 상태.</p></div>`;
   } else if (P && P.empty) html += `<div class="card empty">입력한 종목의 가격 데이터가 아직 없습니다.</div>`;
   el.innerHTML = html;
@@ -356,6 +364,7 @@ function renderPort() {
 }
 function limActHtml(d) {
   const a = d.limAct;
+  if (!a && d.util > 1) return `<p class="note" style="margin-top:6px">한도를 조금 넘었습니다(105% 이내). 잦은 매매를 피하려고 105%를 넘을 때 줄이도록 되어 있습니다 — 지금 줄이고 싶으면 아래 재편안을 보세요.</p>`;
   if (!a) return `<p class="note" style="margin-top:6px">조치 필요 없음 · 105% 넘으면 줄이고, 70% 아래면서 위험자산이 기본 비중보다 작으면 다시 늘립니다.</p>`;
   if (a.kind === "cut") return a.reachable
     ? `<div class="banner" style="margin-top:10px">한도 초과 — 목표 비율대로 위험자산 ${pct(a.k, 0)} → ${pct(a.kNew, 0)}(${won(a.amt)}어치)로 줄여 SGOV로 옮기면 사용률 90%가 됩니다. 아래 <b>한도 맞춤 재편안 ①</b>과 같은 계산이며, 종목별 주수와 다른 방법(원화 현금·위험 큰 종목 위주·다른 ETF 편입)도 거기 있습니다.</div>`
@@ -388,7 +397,7 @@ function plansCard(d) {
       </div>
       <details style="margin-top:8px"><summary>매매 ${p.trades.length}건 보기 (주수)</summary>${tradeTable(p.trades)}<p class="note">매매 후 남는 원화 현금 약 ${won(p.cash)}. 오늘 가격·환율 기준, 정수 주로 맞춘 뒤 VaR를 다시 계산한 값입니다.</p></details>
       <div class="row" style="margin-top:8px"><button class="btn" data-plan="${i}">시뮬레이터에 넣기</button></div></div>`;
-  }).join("") + `<p class="note">균형 기대수익이 높을수록 같은 한도 안에서 수익 여지를 더 남긴 안입니다. ③ 이후는 후보 ETF 중 최대 30%까지 편입해 보고 가장 나은 것만 보여줍니다. 계산 창: 최근 ${P.years}년.</p>`;
+  }).join("") + `<p class="note">균형 기대수익이 높을수록 같은 한도 안에서 수익 여지를 더 남긴 안입니다. '새로 편입' 안은 후보 ETF를 최대 30%까지 넣어 보고 가장 나은 것만 보여줍니다. 계산 창: 최근 ${P.years}년.</p>`;
   return `<div class="card"><h2>한도 맞춤 재편안 ${ib("한도 맞춤 재편안")}</h2>
     <div class="row"><label class="small">목표 사용률</label><select id="planT">${[0.7, 0.8, 0.9, 1].map(x => `<option value="${x}" ${Math.abs(x - tg) < 1e-9 ? "selected" : ""}>${pct(x, 0)}</option>`).join("")}</select><button class="btn" id="planGo">계산</button><span class="note">한도 ${won(d.limAmt)}</span></div>
     <div id="planBox" style="margin-top:8px">${body}</div></div>`;
@@ -546,8 +555,8 @@ function renderRS() {
 }
 function renderPair() {
   const M = S.market, runners = M.groups.runners.filter(t => S.ctx.R[t]);
-  const hasPort = S.port && !S.port.empty;
-  if (!S.basket) S.basket = hasPort ? ["__port"] : ["SOXX"];
+  const hasPort = !!(S.port && !S.port.empty && S.port.W);
+  if (!S.basket || (S.basket[0] === "__port" && !hasPort)) S.basket = hasPort ? ["__port"] : ["SOXX"];
   const chips = (hasPort ? [["__port", "내 포트(위험자산)"]] : []).concat(runners.map(t => [t, t]));
   $("#mktBody").innerHTML = `<div class="card"><h2>짝 찾기 — 상관이 낮거나 낮아지는 ETF ${ib("상관 낮음")}</h2>
     <div class="banner ok">상관은 예측이 잘 되는 편입니다. 6개월 상관 → 다음 6개월 상관: 상관계수 0.89(평균 오차 ±0.14), 하락장 상관 0.81 (2006~2026, 검증).</div>
@@ -559,16 +568,17 @@ function renderPair() {
     if (k === "__port") S.basket = ["__port"]; else { S.basket = S.basket.filter(x => x !== "__port"); S.basket = S.basket.includes(k) ? S.basket.filter(x => x !== k) : [...S.basket, k]; if (!S.basket.length) S.basket = [k]; }
     renderPair();
   });
-  later(() => {
-    let bw = {};
-    if (S.basket[0] === "__port") { const w = S.port.W.w; for (const t in w) if (t !== E.CASH && t !== "SGOV") bw[t] = w[t]; }
-    else S.basket.forEach(t => { bw[t] = 1 / S.basket.length; });
-    const cands = [...new Set([...M.groups.candidates, ...M.groups.runners])];
-    const P = E.pairs(S.ctx, bw, cands, { low: M.defaults.signals.pair_low_corr, drop: M.defaults.signals.pair_drop });
-    const box = $("#pairBox"); if (!box) return;
+  let bw = {};
+  if (S.basket[0] === "__port") { const w = S.port.W.w; for (const t in w) if (!E.isSafe(t)) bw[t] = w[t]; }
+  else S.basket.forEach(t => { bw[t] = 1 / S.basket.length; });
+  const cands = [...new Set([...M.groups.candidates, ...M.groups.runners])], key = JSON.stringify(bw);
+  S.pairSeq = key; busyOn("pair", "짝 찾기 계산 중…");
+  job("pairs", { bw, cands, opt: { low: M.defaults.signals.pair_low_corr, drop: M.defaults.signals.pair_drop } }).then(P => {
+    const box = $("#pairBox"); if (!box || S.pairSeq !== key) return;
     box.innerHTML = `<p class="note">정렬: 10% 편입 시 변동성 감소가 큰 순 (최근 EWMA와 3년의 평균). 하락장 상관 = 기준 바스켓이 떨어진 날만 계산.</p>
-      ${table(["ETF", "신호", "6개월", "12개월", "1개월", "3개월", "하락장 1년", "하락장 3년", "10% 편입 시 변동성"], P.slice(0, 25).map(p => [`<b>${p.t}</b> <span class="note">${esc(p.name)}</span>`, p.tags.map(tag).join(" ") || "–", `<b>${num(p.c126)}</b>`, num(p.c252), num(p.c21), num(p.c63), num(p.dn252), num(p.dn756), sgp((p.dvol_ewma + p.dvol_y3) / 2)]))}`;
-  });
+      ${table(["ETF · 신호", "상관<div class=\"note\">6개월 / 12개월</div>", "하락장 상관<div class=\"note\">1년 / 3년</div>", "변동성<div class=\"note\">10% 넣으면</div>"], P.slice(0, 25).map(p => [`<div style="white-space:normal;max-width:40vw;text-align:left"><b>${p.t}</b> <span class="note">${esc(p.name)}</span>${p.tags.length ? `<div class="wrap">${p.tags.map(t => `<span style="white-space:nowrap">${tag(t)}</span>`).join("")}</div>` : ""}</div>`, `<b>${num(p.c126)}</b><div class="note">${num(p.c252)}</div>`, `${num(p.dn252)}<div class="note">${num(p.dn756)}</div>`, sgp((p.dvol_ewma + p.dvol_y3) / 2)]))}
+      <p class="note">1·3개월 상관은 잡음이 커서 표에서 뺐습니다(6개월이 다음 6개월을 가장 잘 맞힘 — ⓘ 참고).</p>`;
+  }).catch(e => { const box = $("#pairBox"); if (box) box.textContent = "계산 실패: " + (e.message || e); }).finally(() => busyOff("pair"));
 }
 function renderMg() {
   const M = S.market, G = M.margin, V = M.margin_val || {}, held = S.port && !S.port.empty ? Object.keys(S.port.W.w) : [];
@@ -661,65 +671,88 @@ function renderFr() {
   };
   $("#axAuto").onclick = () => { S.set.fr.axis = null; S.frAuto = null; saveSet(); renderFr(); };
   $("#frPrevX").onclick = () => { S.frPrev = null; renderFr(); };
-  later(() => drawFr(tk));
+  drawFr(tk);
 }
 function drawFr(tk) {
-  const f = S.set.fr, M = E.monthly(S.ctx, tk, f.years);
-  if (M.rows.length < 24) { $("#frNote").textContent = "공통 데이터가 2년 미만이라 그릴 수 없습니다. 이력이 짧은 자산을 빼보세요."; return; }
-  const ex = E.expected(M, f.method, S.set.erp), fr = E.frontier(ex.mu, ex.S, { maxW: f.maxW, rf: ex.rf }), P = fr.pts;
-  $("#frNote").textContent = `월간 수익률 ${M.rows.length}개월(${M.labels[0]}~${M.labels[M.labels.length - 1]}), 달러 기준 · 공분산 Ledoit-Wolf 축소 ${num(ex.shrink)} · 무위험 ${pct(ex.rf, 2)}` +
-    (f.method === "shrink" ? ` · 평균을 ${pct(ex.phi, 0)} 축소` : f.method === "capm" ? ` · 위험프리미엄 ${pct(S.set.erp, 1)} × 베타` : " · 과거 평균 그대로(최근 많이 오른 자산에 쏠림)");
-  const hasP = S.port && !S.port.empty && !Object.keys(S.port.W.w).some(t => frOff().includes(t === E.CASH ? "SGOV" : t));
+  const f = S.set.fr, seq = S.frSeq = (S.frSeq || 0) + 1;
+  const hasP = S.port && !S.port.empty && S.port.W && !Object.keys(S.port.W.w).some(t => frOff().includes(t === E.CASH ? "SGOV" : t));
   const map = w => { const o = {}; for (const k in w) { const t = k === E.CASH ? "SGOV" : k; o[t] = (o[t] || 0) + w[k]; } return o; };
-  const cur = hasP ? E.point(ex, tk, map(S.port.W.w)) : null;
-  if (S.frIdx === null) { const v0 = cur ? cur.vol : fr.maxSharpe.vol; let bi = 0; P.forEach((p, i) => { if (Math.abs(p.vol - v0) < Math.abs(P[bi].vol - v0)) bi = i; }); S.frIdx = bi; }
+  const curW = hasP ? map(S.port.W.w) : null;
+  const acts = hasP && S.rec && S.rec.actions && S.overlay !== null ? S.rec.actions : [];
+  const recW = acts.map(a => Object.keys(a.w1).every(t => tk.includes(t === E.CASH ? "SGOV" : t)) ? map(a.w1) : null);
+  const c = $("#cFr"); if (c && !c.dataset.drawn) c.innerHTML = spin("투자선 계산 중…");
+  busyOn("fr", "투자선 계산 중…");
+  job("frontier", { tk, allTk: frAll(), years: f.years, method: f.method, erp: S.set.erp, maxW: f.maxW, curW, recW })
+    .then(R => { if (seq !== S.frSeq || S.view !== "fr") return; paintFr(tk, R, acts, recW); })
+    .catch(e => { const n = $("#frNote"); if (n) n.textContent = "투자선 계산 실패: " + (e.message || e); })
+    .finally(() => busyOff("fr"));
+}
+function paintFr(tk, R, acts, recW) {
+  const f = S.set.fr;
+  if (R.short) { $("#frNote").textContent = "공통 데이터가 2년 미만이라 그릴 수 없습니다. 이력이 짧은 자산을 빼보세요."; return; }
+  const P = R.pts, cur = R.cur;
+  $("#frNote").textContent = `월간 수익률 ${R.n}개월(${R.from}~${R.to}), 달러 기준 · 공분산 Ledoit-Wolf 축소 ${num(R.shrink)} · 무위험 ${pct(R.rf, 2)}` +
+    (f.method === "shrink" ? ` · 평균을 ${pct(R.phi, 0)} 축소` : f.method === "capm" ? ` · 위험프리미엄 ${pct(S.set.erp, 1)} × 베타` : " · 과거 평균 그대로(최근 많이 오른 자산에 쏠림)");
+  if (S.frIdx === null || S.frIdx >= P.length) { const v0 = cur ? cur.vol : R.maxSharpe.vol; let bi = 0; P.forEach((p, i) => { if (Math.abs(p.vol - v0) < Math.abs(P[bi].vol - v0)) bi = i; }); S.frIdx = bi; }
   const sl = $("#frSl"); sl.max = P.length - 1; sl.value = S.frIdx;
+  const assetTr = { x: tk.map((t, i) => R.sd[i]), y: R.mu, text: tk, mode: "markers+text", textposition: "top center", textfont: { size: 10.5, color: css("--ink2") }, name: "개별 자산", marker: { size: 8, color: css("--axis"), line: { color: css("--card"), width: 1.5 } }, hovertemplate: "%{text}<br>변동성 %{x:.1%}<br>기대수익 %{y:.1%}<extra></extra>" };
   const traces = [
     { x: P.map(p => p.vol), y: P.map(p => p.ret), mode: "lines", name: "효율적 투자선", line: { color: css("--s1"), width: 2.5 }, hovertemplate: "변동성 %{x:.1%}<br>기대수익 %{y:.1%}<extra>투자선</extra>" },
-    { x: tk.map((t, i) => Math.sqrt(ex.S[i][i])), y: ex.mu, text: tk, mode: "markers+text", textposition: "top center", textfont: { size: 10.5, color: css("--ink2") }, name: "개별 자산", marker: { size: 8, color: css("--axis"), line: { color: css("--card"), width: 1.5 } }, hovertemplate: "%{text}<br>변동성 %{x:.1%}<br>기대수익 %{y:.1%}<extra></extra>" },
-    { x: [fr.maxSharpe.vol], y: [fr.maxSharpe.ret], mode: "markers", name: "최대 샤프", marker: { symbol: "diamond", size: 11, color: css("--s3"), line: { color: css("--card"), width: 2 } }, hovertemplate: "최대 샤프<br>%{x:.1%}, %{y:.1%}<extra></extra>" },
+    assetTr,
+    { x: [R.maxSharpe.vol], y: [R.maxSharpe.ret], mode: "markers", name: "최대 샤프", marker: { symbol: "diamond", size: 11, color: css("--s3"), line: { color: css("--card"), width: 2 } }, hovertemplate: "최대 샤프<br>%{x:.1%}, %{y:.1%}<extra></extra>" },
   ];
+  // 벤치마크: S&P500 은 자산 목록과 상관없이 항상 같은 가정·같은 기간으로 표시
+  if (R.spy) traces.push({ x: [R.spy.vol], y: [R.spy.ret], mode: "markers+text", text: ["S&P500"], textposition: "bottom center", textfont: { size: 11, color: css("--ink") }, name: "S&P500(벤치마크)", marker: { symbol: "square", size: 11, color: css("--ink"), line: { color: css("--card"), width: 1.5 } }, hovertemplate: "S&P500 (벤치마크)<br>변동성 %{x:.1%}<br>기대수익 %{y:.1%}<extra></extra>" });
   const ann = [];
   if (cur) traces.push({ x: [cur.vol], y: [cur.ret], mode: "markers", name: "현재 포트", marker: { symbol: "star", size: 16, color: css("--s8"), line: { color: css("--card"), width: 1.5 } }, hovertemplate: "현재 포트<br>변동성 %{x:.1%}<br>기대수익 %{y:.1%}<extra></extra>" });
-  if (cur && S.rec && S.overlay !== null) {
-    S.rec.actions.filter(a => Object.keys(a.w1).every(t => tk.includes(t === E.CASH ? "SGOV" : t))).forEach((a, i) => {
-      const p = E.point(ex, tk, map(a.w1)), on = i === S.overlay;
-      traces.push({ x: [p.vol], y: [p.ret], mode: "markers+text", text: [String(i + 1)], textposition: "middle right", textfont: { size: 11, color: css("--ink") }, name: a.title, marker: { size: on ? 12 : 9, color: on ? css("--s2") : css("--s4"), line: { color: css("--card"), width: 1.5 } }, hovertemplate: `${esc(a.title)}<br>변동성 %{x:.1%}<br>기대수익 %{y:.1%}<extra></extra>` });
-      ann.push({ x: p.vol, y: p.ret, ax: cur.vol, ay: cur.ret, xref: "x", yref: "y", axref: "x", ayref: "y", showarrow: true, arrowhead: 2, arrowsize: 1, arrowwidth: on ? 2 : 1, arrowcolor: on ? css("--s2") : css("--axis"), text: "" });
-    });
-  }
+  const recPts = R.recPts || [];
+  if (cur && acts.length) acts.forEach((a, i) => {
+    const p = recPts[i]; if (!p) return; const on = i === S.overlay;
+    traces.push({ x: [p.vol], y: [p.ret], mode: "markers+text", text: [String(i + 1)], textposition: "middle right", textfont: { size: 11, color: css("--ink") }, name: a.title, marker: { size: on ? 12 : 9, color: on ? css("--s2") : css("--s4"), line: { color: css("--card"), width: 1.5 } }, hovertemplate: `${esc(a.title)}<br>변동성 %{x:.1%}<br>기대수익 %{y:.1%}<extra></extra>` });
+    ann.push({ x: p.vol, y: p.ret, ax: cur.vol, ay: cur.ret, xref: "x", yref: "y", axref: "x", ayref: "y", showarrow: true, arrowhead: 2, arrowsize: 1, arrowwidth: on ? 2 : 1, arrowcolor: on ? css("--s2") : css("--axis"), text: "" });
+  });
   if (S.frPrev) traces.unshift({ x: S.frPrev.pts.map(p => p[0]), y: S.frPrev.pts.map(p => p[1]), mode: "lines", name: S.frPrev.label, line: { color: css("--muted"), width: 1.5, dash: "dash" }, hovertemplate: `${esc(S.frPrev.label)}<br>변동성 %{x:.1%}<br>기대수익 %{y:.1%}<extra></extra>` });
   S.frLast = P.map(p => [p.vol, p.ret]);
   const sel = P[S.frIdx];
   const vline = x => ({ type: "line", x0: x, x1: x, yref: "paper", y0: 0, y1: 1, line: { color: css("--muted"), width: 1, dash: "dot" } });
-  // 축 고정: 목록의 모든 자산(꺼진 것 포함)으로 범위를 한 번 정하고, 이후에는 넓어지기만 함
+  // 축 고정: 목록의 모든 자산(꺼진 것 포함)과 S&P500 으로 범위를 한 번 정하고, 이후에는 넓어지기만 함
   const akey = [f.method, f.years, f.maxW].join("|");
   if (!S.frAuto || S.frAuto.key !== akey) {
-    let xs = [0], ys = [];
-    const allTk = frAll(), Ma = E.monthly(S.ctx, allTk, f.years);
-    if (Ma.rows.length >= 24) { const ea = E.expected(Ma, f.method, S.set.erp); allTk.forEach((t, i) => { xs.push(Math.sqrt(ea.S[i][i])); ys.push(ea.mu[i]); }); ys.push(ea.rf); }
+    const xs = [0], ys = [];
+    if (R.auto) { R.auto.vols.forEach(v => xs.push(v)); R.auto.mus.forEach(v => ys.push(v)); ys.push(R.auto.rf); }
     S.frAuto = { key: akey, x: [0, Math.max(...xs)], y: ys.length ? [Math.min(...ys), Math.max(...ys)] : [0, 0.1] };
   }
-  const ext = [...P.map(p => [p.vol, p.ret]), ...tk.map((t, i) => [Math.sqrt(ex.S[i][i]), ex.mu[i]]), ...(cur ? [[cur.vol, cur.ret]] : [])];
+  const ext = [...P.map(p => [p.vol, p.ret]), ...tk.map((t, i) => [R.sd[i], R.mu[i]]), ...(cur ? [[cur.vol, cur.ret]] : []), ...(R.spy ? [[R.spy.vol, R.spy.ret]] : [])];
   S.frAuto.x = [0, Math.max(S.frAuto.x[1], ...ext.map(e => e[0]))];
   S.frAuto.y = [Math.min(S.frAuto.y[0], ...ext.map(e => e[1])), Math.max(S.frAuto.y[1], ...ext.map(e => e[1]))];
   const padY = (S.frAuto.y[1] - S.frAuto.y[0]) * 0.1;
   let xr = f.axis ? f.axis.x : [S.frAuto.x[0], S.frAuto.x[1] * 1.08], yr = f.axis ? f.axis.y : [S.frAuto.y[0] - padY, S.frAuto.y[1] + padY * 1.5];
   ["ax0", "ax1", "ay0", "ay1"].forEach((id, k) => { const el = $("#" + id); if (el && el.value === "") el.value = ((k < 2 ? xr : yr)[k % 2] * 100).toFixed(1); });
-  const showActs = cur && S.rec && S.overlay !== null;
+  const showActs = cur && acts.length;
   if (S.frZoom === undefined) S.frZoom = !!showActs;
   if (cur && S.frZoom && S.frZoomRange && S.frZoomRange.key === akey) { xr = S.frZoomRange.x; yr = S.frZoomRange.y; }
   else if (cur && S.frZoom) {
-    const pts = [cur, ...(showActs ? S.rec.actions.filter(a => Object.keys(a.w1).every(t => tk.includes(t === E.CASH ? "SGOV" : t))).map(a => E.point(ex, tk, map(a.w1))) : [])], vs = pts.map(p => p.vol), rs = pts.map(p => p.ret);
+    const pts = [cur, ...(showActs ? recPts.filter(Boolean) : [])], vs = pts.map(p => p.vol), rs = pts.map(p => p.ret);
     const dx = Math.max(0.03, (Math.max(...vs) - Math.min(...vs)) * 0.6), dy = Math.max(0.015, (Math.max(...rs) - Math.min(...rs)) * 0.6);
     xr = [Math.min(...vs) - dx, Math.max(...vs) + dx]; yr = [Math.min(...rs) - dy, Math.max(...rs) + dy];
-    S.frZoomRange = { key: akey, x: xr, y: yr };  // 확대 범위도 고정 (자산을 넣고 빼도 그대로)
+    S.frZoomRange = { key: akey, x: xr, y: yr };
   }
   const fine = (xr[1] - xr[0]) < 0.12;
+  // 가까이 붙은 자산 이름이 겹치지 않게 위/아래/오른쪽/왼쪽으로 번갈아 배치 (S&P500 이름 자리도 피함)
+  const placed = R.spy ? [[R.spy.vol, R.spy.ret, "bottom center"]] : [], W_ = xr[1] - xr[0], H_ = yr[1] - yr[0];
+  assetTr.textposition = tk.map((t, i) => {
+    const x = R.sd[i], y = R.mu[i], edge = x - xr[0] < W_ * 0.08;
+    const POS = edge ? ["top right", "bottom right", "middle right"] : ["top center", "bottom center", "middle right", "middle left", "top right", "bottom left"];
+    const near = placed.filter(([px, py]) => Math.abs(px - x) < W_ * 0.12 && Math.abs(py - y) < H_ * 0.07).map(q => q[2]);
+    const pos = POS.find(q => !near.includes(q)) || POS[0]; placed.push([x, y, pos]); return pos;
+  });
+  const sp0 = $("#cFr .empty"); if (sp0) sp0.remove();
+  const zoomedOut = R.spy && cur && S.frZoom && (R.spy.vol < xr[0] || R.spy.vol > xr[1] || R.spy.ret < yr[0] || R.spy.ret > yr[1]);
   plot("cFr", traces, { xaxis: AX({ tickformat: fine ? ".1%" : ".0%", title: { text: "연 변동성", font: { size: 11 } }, range: xr }), yaxis: AX({ tickformat: (yr[1] - yr[0]) < 0.06 ? ".1%" : ".0%", title: { text: "기대수익(연)", font: { size: 11 } }, range: yr }), annotations: ann, shapes: [vline(sel.vol)] });
+  const cf = $("#cFr"); if (cf) cf.dataset.drawn = 1;
   const px = $("#frPrevX"); if (px) px.hidden = !S.frPrev;
-  const zb = $("#frZoom"); if (zb) { zb.hidden = !cur; zb.textContent = S.frZoom ? "전체 보기" : (showActs ? "변경안 주변 확대" : "현재 포트 주변 확대"); zb.onclick = () => { S.frZoom = !S.frZoom; S.frZoomRange = null; drawFr(tk); }; }
-  $("#frLeg").innerHTML = `<span><i style="background:var(--s1)"></i>투자선</span>${S.frPrev ? `<span><i style="background:var(--muted)"></i>${esc(S.frPrev.label)}(점선)</span>` : ""}<span><i style="background:var(--s3)"></i>최대 샤프</span>${cur ? '<span><i style="background:var(--s8)"></i>현재 포트(★)</span>' : ""}${S.overlay !== null && S.rec ? '<span><i style="background:var(--s2)"></i>추천 변경안(번호)</span>' : ""}<span><i style="background:var(--axis)"></i>개별 자산</span>`;
+  const zb = $("#frZoom"); if (zb) { zb.hidden = !cur; zb.textContent = S.frZoom ? "전체 보기" : (showActs ? "변경안 주변 확대" : "현재 포트 주변 확대"); zb.onclick = () => { S.frZoom = !S.frZoom; S.frZoomRange = null; paintFr(tk, R, acts, recW); }; }
+  $("#frLeg").innerHTML = `<span><i style="background:var(--s1)"></i>투자선</span>${S.frPrev ? `<span><i style="background:var(--muted)"></i>${esc(S.frPrev.label)}(점선)</span>` : ""}<span><i style="background:var(--s3)"></i>최대 샤프</span><span><i style="background:var(--ink)"></i>S&P500(■ 벤치마크)${R.spy ? ` ${pct(R.spy.vol, 0)} / ${pct(R.spy.ret, 1)}` : ""}${zoomedOut ? " — 확대 범위 밖, '전체 보기'로 확인" : ""}</span>${cur ? '<span><i style="background:var(--s8)"></i>현재 포트(★)</span>' : ""}${showActs ? '<span><i style="background:var(--s2)"></i>추천 변경안(번호)</span>' : ""}<span><i style="background:var(--axis)"></i>개별 자산</span>`;
   // 비중 변화 (8개 넘으면 평균 비중 작은 것부터 '기타'로)
   const avg = tk.map((t, j) => [t, j, P.reduce((s, p) => s + p.w[j], 0)]).sort((a, b) => b[2] - a[2]);
   const main = avg.slice(0, 7), rest = avg.slice(7), groups = main.map(([t, j]) => [t, [j]]); if (rest.length) groups.push(["기타", rest.map(x => x[1])]);
@@ -727,17 +760,14 @@ function drawFr(tk) {
   plot("cTr", groups.map(([t, js], i) => ({ x: P.map(p => p.vol), y: P.map(p => js.reduce((s, j) => s + p.w[j], 0)), stackgroup: "w", name: t, mode: "lines", line: { width: 0.5, color: css("--card") }, fillcolor: css(SER[i % 8]), hovertemplate: `${t} %{y:.0%}<extra></extra>` })),
     { showlegend: true, hovermode: "x unified", xaxis: AX({ tickformat: fine ? ".1%" : ".0%", title: { text: "연 변동성", font: { size: 11 } }, range: xr }), yaxis: AX({ tickformat: ".0%", range: [0, 1] }), shapes: [vline(sel.vol)], legend: { orientation: "h", y: -0.25 } });
   const showW = () => {
-    const p = P[S.frIdx]; $("#frVol").textContent = `${pct(p.vol)} → 기대수익 ${pct(p.ret)} (샤프 ${num((p.ret - ex.rf) / p.vol)})`;
+    const p = P[S.frIdx]; $("#frVol").textContent = `${pct(p.vol)} → 기대수익 ${pct(p.ret)} (샤프 ${num((p.ret - R.rf) / p.vol)})`;
     const cw = cur ? cur.v : null;
     $("#frW8").innerHTML = table(["자산", "투자선 비중", ...(cw ? ["현재 비중", "차이"] : [])], tk.map((t, j) => [t, pct(p.w[j], 0), ...(cw ? [pct(cw[j], 0), sgp(p.w[j] - cw[j]).replace(/pos|neg/, "")] : [])]).filter((r, j) => p.w[j] > 0.005 || (cw && cw[j] > 0.005)));
   };
   showW();
   sl.oninput = () => { S.frIdx = +sl.value; showW(); const s = [vline(P[S.frIdx].vol)]; Plotly.relayout("cFr", { shapes: s }); Plotly.relayout("cTr", { shapes: s }); };
   // 세 방식 비교
-  const rows = E.METHODS.map(([m, l]) => {
-    const e2 = E.expected(M, m, S.set.erp), f2 = E.frontier(e2.mu, e2.S, { maxW: f.maxW, rf: e2.rf }), c2 = cur ? E.point(e2, tk, map(S.port.W.w)) : null;
-    return [l, pct(f2.maxSharpe.ret), pct(f2.maxSharpe.vol), Object.entries(Object.fromEntries(tk.map((t, j) => [t, f2.maxSharpe.w[j]]))).filter(x => x[1] > 0.02).sort((a, b) => b[1] - a[1]).map(([t, v]) => `${t} ${pct(v, 0)}`).join(", "), c2 ? sgp(E.retAtVol(f2, c2.vol) - c2.ret).replace(/pos|neg/, "") : "–"];
-  });
+  const rows = R.meth.map(x => [x.l, pct(x.ms.ret), pct(x.ms.vol), tk.map((t, j) => [t, x.ms.w[j]]).filter(y => y[1] > 0.02).sort((a, b) => b[1] - a[1]).map(([t, v]) => `${t} ${pct(v, 0)}`).join(", "), x.gap !== null ? sgp(x.gap).replace(/pos|neg/, "") : "–"]);
   $("#frMeth").innerHTML = `<p class="desc">과거 평균: PV와 같은 방식(추정오차 큼). 축소 추정: 평균을 최소분산 포트폴리오 쪽으로 당김(Jorion 1986). 시장 균형: 무위험 + 베타×위험프리미엄(과거 수익 거의 무시).</p>
     ${table(["가정", "최대샤프 수익", "변동성", "최대샤프 구성", ...(cur ? ["현재 대비 개선 여지"] : [])], rows.map(r => cur ? r : r.slice(0, 4)))}
     <p class="note">세 가정에서 최대샤프 구성이 크게 다르면 그 차이는 '수익 예측'에서 나온 것입니다. 공통으로 남는 비중이 더 믿을 만합니다.</p>`;
@@ -792,7 +822,7 @@ function renderSet() {
   const el = $("#v-set"), L = S.set.limit, ri = repoInfo();
   el.innerHTML = `<div class="card"><h2>위험한도 ${ib("위험한도")}</h2>
     <div class="row"><button class="btn primary" id="presetB">B 방식으로 한 번에 설정</button></div>
-    <p class="note">분기초 평가액의 20% 한도 + 분기 점검·5/25 허용범위(위험자산 안 비율 기준) + 현재 비중을 목표로 저장. 2018~2026 백테스트에서 고른 방식입니다.</p>
+    <p class="note">1년 95% VaR ≤ 분기초 평가액의 20% + 분기 점검·5/25 허용범위(위험자산 안 비율 기준) + 현재 비중을 목표로 저장. 누르면 한도 기간도 1년으로 바뀝니다(3개월 등 다른 기간을 쓰려면 누른 뒤 아래에서 다시 고르세요).</p>
     <div class="row" style="margin-top:8px"><label class="small" style="width:100px">한도 방식</label><select id="limM" style="flex:1"><option value="pct" ${L.mode === "pct" ? "selected" : ""}>분기초 평가액의 %</option><option value="amount" ${L.mode !== "pct" ? "selected" : ""}>고정 금액</option></select></div>
     <div class="row" id="limPRow" style="margin-top:6px;${L.mode === "pct" ? "" : "display:none"}"><label class="small" style="width:100px">분기초의</label><input type="number" step="1" id="limP" value="${((L.pct || 0.2) * 100).toFixed(0)}" style="width:80px">%<span class="note" id="limPNote">${portReady() && S.port.diag.qStart ? `지금 기준 ${won(S.port.diag.limAmt)}` : ""}</span></div>
     <div class="row" id="limARow" style="margin-top:6px;${L.mode === "pct" ? "display:none" : ""}"><label class="small" style="width:100px">고정 금액(원)</label><input type="number" id="limA" value="${L.amount}" style="flex:1"></div>
@@ -832,9 +862,9 @@ function renderSet() {
     <div class="row" style="margin-top:10px"><button class="btn" id="theme">다크/라이트 전환</button><button class="btn" id="wipe">이 기기 데이터 지우기</button></div>
     <p class="note">통계적 추정이며 투자 권유가 아닙니다.</p></div>`;
   $("#limM").onchange = () => { const p = $("#limM").value === "pct"; $("#limPRow").style.display = p ? "" : "none"; $("#limARow").style.display = p ? "none" : ""; };
-  $("#limP").oninput = () => { const q = S.port && !S.port.empty && E.quarterStart(S.ctx, S.port.W.w, S.port.W.nav); const n = $("#limPNote"); if (q && n) n.textContent = `지금 기준 ${won(q.value * (+$("#limP").value / 100))} (분기초 ${won(q.value)})`; };
+  $("#limP").oninput = () => { const q = portReady() && S.port.diag.qStart; const n = $("#limPNote"); if (q && n) n.textContent = `지금 기준 ${won(q.value * (+$("#limP").value / 100))} (분기초 ${won(q.value)})`; };
   $("#setSave").onclick = () => {
-    S.set.limit = { mode: $("#limM").value, pct: +$("#limP").value / 100, amount: +$("#limA").value, h: +$("#limH").value, c: +$("#limC").value, warn: +$("#limW").value / 100 };
+    S.set.limit = { mode: $("#limM").value, pct: +$("#limP").value / 100, amount: +$("#limA").value, h: +$("#limH").value, c: +$("#limC").value, warn: +$("#limW").value / 100, qSnap: S.set.limit.qSnap };
     S.set.erp = +$("#erp").value / 100; S.set.repo = $("#repo").value.trim(); saveSet(); computePort(); autoSync("#setMsg", "저장됨"); renderHdr();
   };
   $("#rbSave").onclick = () => { S.set.rule = { mode: $("#rbMode").value, freq: $("#rbFreq").value, abs: +$("#rbAbs").value / 100, rel: +$("#rbRel").value / 100, basis: $("#rbBasis").value }; saveSet(); computePort(); autoSync("#rbMsg", "저장됨 · 알림과 비교표에 반영"); };
@@ -863,7 +893,7 @@ function go(v) {
   S.view = v; document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
   document.querySelectorAll("section.view").forEach(s => s.classList.toggle("on", s.id === "v-" + v));
   window.scrollTo(0, 0);
-  if (v === "fr" || v === "mkt") { busyOn("view", "화면 준비 중…"); requestAnimationFrame(() => setTimeout(() => { try { renderView(); } finally { busyOff("view"); } }, 0)); }
+  if (v === "mkt") { busyOn("view", "화면 준비 중…"); requestAnimationFrame(() => setTimeout(() => { try { renderView(); } finally { busyOff("view"); } }, 0)); }
   else renderView();
 }
 function renderView() { ({ home: renderHome, port: renderPort, mkt: renderMkt, fr: renderFr, set: renderSet })[S.view](); }
