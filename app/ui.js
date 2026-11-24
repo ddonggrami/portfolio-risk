@@ -86,11 +86,15 @@ const INFO = {
      ["다시 늘릴 때", "사용률이 70% 아래로 내려오고 위험자산이 기본 비중(목표비중의 위험자산 합)보다 작으면, 90%가 되는 선까지 목표 비율대로 다시 삽니다."],
      ["분기초 평가액", "분기 들어 처음 계산할 때 '그때 보유 수량 × 직전 분기 마지막 거래일 종가(원화)'로 정하고, 그 분기 동안은 고정합니다. 분기 중에 매매해도 한도가 흔들리지 않습니다."],
      ["근거 (백테스트)", "2018~2026, 원화. 1년 VaR ≤ 분기초 20%: 연수익 19.8%, 최대낙폭 −25.9%. 3개월 VaR ≤ 10%: 18.1% / −22.9%. 그대로 보유: 25.9% / −51.5%. 3개월 뒤 쓸 돈처럼 기간이 정해진 돈은 한도보다 미리 원화로 빼 두는 편이 확실합니다."]]],
-  "한도 맞춤 재편안": ["한도 맞춤 재편안", "한도 기준 VaR(설정에서 고른 기간·신뢰수준) 사용률을 목표(기본 90%)까지 낮추는 방법을 세 가지로 계산합니다. 각 안은 정수 주로 맞춘 뒤 VaR를 다시 계산했습니다.",
+  "한도 맞춤 재편안": ["한도 맞춤 재편안", "한도 기준 VaR(설정에서 고른 기간·신뢰수준) 사용률을 목표(기본 90%)에 맞추는 방법입니다. 목표보다 높으면 줄이는 안, 낮으면 늘리는 안을 보여줍니다. 한도를 넘었거나 사용률이 70% 아래면 자동으로 계산하고, 그 사이에서는 '계산'을 누르면 됩니다. 각 안은 정수 주로 맞춘 뒤 VaR를 다시 계산했습니다.",
     [["목표 비율 그대로 줄이고 SGOV로", "위험자산 안의 목표 비율은 그대로 두고 전체 크기만 줄여 SGOV로. 리밸런싱 규칙과 충돌이 없는 기본안. 위험한도 문구의 '얼마어치 줄이기'도 이 계산입니다."],
      ["목표 비율 그대로 줄이고 원화 현금으로", "판 돈을 SGOV 대신 원화(CMA·파킹통장 등)로 두는 안. SGOV는 원화 기준으로 환율 위험이 있지만 원화 현금은 없어서, 같은 한도에서 덜 팔아도 됩니다. 대신 환전 비용과, 다시 살 때 환율이 달라지는 위험이 있습니다."],
      ["위험기여 큰 종목 위주로", "1%p를 SGOV로 옮겼을 때 VaR가 가장 많이 줄어드는 종목부터 팝니다. 매매 건수가 적지만 목표 비율에서 벗어납니다."],
      ["다른 ETF 새로 편입", "시장·후보 목록의 ETF(이력 5년 이상) 중, 일부(10~30%)를 편입하고 나머지 초과분만 SGOV로 옮겼을 때 균형 기대수익이 가장 높게 남는 조합. 첫 번째 안보다 나을 때만 표시합니다."],
+     ["늘릴 때: 목표 비율대로", "SGOV → 원화 현금 순으로 꺼내 위험자산 안 목표 비율대로 삽니다. 목표 비율과 지금 비율이 다르면 일부 종목은 오히려 줄어들 수 있습니다(리밸런싱을 겸함)."],
+     ["늘릴 때: 기대수익 큰 종목 위주", "1%p씩 살 때마다, VaR가 늘어나는 만큼에 비해 균형 기대수익이 가장 큰 종목을 고릅니다. 매매 건수가 적지만 목표 비율에서 벗어납니다."],
+     ["늘릴 때: 다른 ETF 편입", "안전자산 일부(10~30%)로 후보 ETF를 새로 사고 남은 여유는 목표 비율대로 채웠을 때, 위 안들보다 균형 기대수익이 높으면 표시합니다."],
+     ["자동 '다시 늘리기' 신호와의 차이", "VaR 카드의 '여유 생김' 신호는 사용률 70% 미만 + 위험자산이 기본 비중보다 작을 때만, 기본 비중까지만 늘리는 보수적인 규칙입니다(잦은 매매 방지). 이 재편안은 원하는 목표 사용률까지 늘리는 방법을 직접 보여줍니다."],
      ["주의", "VaR는 최근 10년 표본 기준입니다. 채권처럼 과거에 주식과 반대로 움직였던 자산은 그 관계가 바뀌면(2022년처럼) 효과가 줄어듭니다."]]],
   "균형 기대수익": ["균형 기대수익", "각 ETF의 S&P500 대비 베타 × 주식 위험프리미엄 + 무위험금리(최근 5년 월간). 최근 성과를 따라가지 않는 중립적인 기준으로, 재편안끼리 '수익 여지를 얼마나 남겼는지' 비교하는 용도입니다. 예측이 아닙니다.", []],
   "견고한 개선": ["견고한 개선", "과거 평균·축소 추정·시장 균형 <b>세 가지 기대수익 가정 모두</b>에서 샤프 비율이 좋아지는 변경안입니다. 수익 예측이 틀려도 개선될 가능성이 높습니다.", []],
@@ -212,7 +216,7 @@ function computePort() {
     const jobs = [job("recommend", { w: r.W.w, nav: r.W.nav, diag: r.diag, set }).then(x => {
       if (seq !== S.portSeq) return; S.rec = x; refreshPort(); if (S.view === "home") renderHome(); if (S.view === "fr") renderFr();
     })];
-    if (r.diag.util > 1) jobs.push(calcPlans(S.planTarget || 0.9, true, seq));
+    if (r.diag.util > 1 || r.diag.util < 0.7) jobs.push(calcPlans(S.planTarget || 0.9, true, seq));
     return Promise.all(jobs).catch(e => { if (seq !== S.portSeq) return; if (!S.rec) S.rec = { actions: [], error: String(e.message || e) }; refreshPort(); if (S.view === "home") renderHome(); }).finally(() => busyOff("rec"));
   }).catch(e => {
     if (seq !== S.portSeq) return;
@@ -374,7 +378,7 @@ function limActHtml(d) {
   const rows = Object.entries(a.trades).filter(([, v]) => Math.abs(v) >= 1e4).sort((x, y) => Math.abs(y[1]) - Math.abs(x[1]))
     .map(([t, v]) => [t, `${v > 0 ? "매수" : "매도"} ${won(Math.abs(v))}`, lp[t] ? `약 ${Math.round(Math.abs(v) / (lp[t] * fx))}주` : "–"]);
   return `<div class="action" style="margin-top:10px"><div class="spread"><span class="h">${a.kind === "cut" ? "한도 초과 — 위험자산 줄이기" : "여유 생김 — 위험자산 다시 늘리기"}</span>${badge(a.kind === "cut" ? "critical" : "info", `${pct(a.k, 0)} → ${pct(a.kNew, 0)}`)}</div>
-    ${table(["종목", "매매", "주수"], rows)}<p class="note">${a.kind === "cut" ? "모든 위험자산을 같은 비율로 줄여 위험자산 안의 비율은 그대로 둡니다." : "목표비중의 위험자산 안 비율대로 삽니다."} 주수는 오늘 가격 기준 근사입니다.</p></div>`;
+    ${table(["종목", "매매", "주수"], rows)}<p class="note">${a.kind === "cut" ? "모든 위험자산을 같은 비율로 줄여 위험자산 안의 비율은 그대로 둡니다." : "목표비중의 위험자산 안 비율대로 삽니다(기본 비중까지). 다른 방법은 아래 '한도 맞춤 재편안'에 있습니다."} 주수는 오늘 가격 기준 근사입니다.</p></div>`;
 }
 // ───────── 한도 맞춤 재편안 ─────────
 const wonS = x => (x > 0 ? "+" : x < 0 ? "−" : "") + won(Math.abs(x));
@@ -384,12 +388,12 @@ function tradeTable(T) {
 function plansCard(d) {
   const tg = S.planTarget || 0.9, P = S.plans;
   let body;
-  if (!P) body = d.util > 1 ? spin("재편안 계산 중…") : `<p class="desc">지금은 한도 안(사용률 ${pct(d.util, 0)})이라 자동으로 계산하지 않았습니다. 미리 보려면 목표 사용률을 고르고 '계산'을 누르세요.</p>`;
-  else if (!P.need) body = `<p class="desc">현재 사용률 ${pct(P.util0, 0)}로 이미 목표(${pct(tg, 0)}) 안입니다.</p>`;
-  else if (!P.plans.length) body = `<p class="desc">위험자산을 모두 줄여도 목표에 닿지 않습니다. 목표 사용률을 높이거나 한도를 다시 정해 주세요.</p>`;
-  else body = (P.floorSGOV && !P.floorSGOV.reachable ? `<div class="banner">SGOV로 옮기는 것만으로는 목표에 닿지 않습니다. SGOV도 원화로 보면 환율 위험이 있어서, 위험자산을 ${pct(P.floorSGOV.k, 0)}까지 줄였을 때 ${E.limLabel(S.set.limit)} ${won(P.floorSGOV.var)}가 최저입니다. 원화 현금·다른 ETF 안을 보세요.</div>` : "") + P.plans.map((p, i) => {
+  if (!P) body = d.util > 1 || d.util < 0.7 ? spin("재편안 계산 중…") : `<p class="desc">지금 사용률 ${pct(d.util, 0)} — 줄일 필요도, 크게 늘릴 여유도 없는 구간이라 자동으로 계산하지 않았습니다. 목표 사용률을 고르고 '계산'을 누르면 그 수준까지 <b>줄이는 안 또는 늘리는 안</b>을 보여줍니다.</p>`;
+  else if (P.dir === "none") body = `<p class="desc">현재 사용률 ${pct(P.util0, 0)}로 목표(${pct(tg, 0)})와 거의 같습니다. 다른 목표 사용률을 골라 보세요.</p>`;
+  else if (!P.plans.length) body = P.dir === "add" ? `<p class="desc">사용률 ${pct(P.util0, 0)}로 목표(${pct(tg, 0)})보다 여유가 있지만, 늘리는 데 쓸 SGOV·원화 현금이 없습니다.</p>` : `<p class="desc">위험자산을 모두 줄여도 목표에 닿지 않습니다. 목표 사용률을 높이거나 한도를 다시 정해 주세요.</p>`;
+  else body = (P.dir === "add" ? `<div class="banner" style="background:var(--okbg,#e8f5ee)">여유 있음 — 사용률 ${pct(P.util0, 0)} → 목표 ${pct(tg, 0)}까지 <b>위험자산을 늘리는 안</b>입니다(SGOV·원화 현금에서 꺼내 매수, 빚 없이).${P.k0 ? ` 목표비중 기준 기본 위험자산 비중은 ${pct(P.k0, 0)}입니다.` : ""}</div>` : "") + (P.floorSGOV && !P.floorSGOV.reachable ? `<div class="banner">SGOV로 옮기는 것만으로는 목표에 닿지 않습니다. SGOV도 원화로 보면 환율 위험이 있어서, 위험자산을 ${pct(P.floorSGOV.k, 0)}까지 줄였을 때 ${E.limLabel(S.set.limit)} ${won(P.floorSGOV.var)}가 최저입니다. 원화 현금·다른 ETF 안을 보세요.</div>` : "") + P.plans.map((p, i) => {
     const c = p.check;
-    return `<div class="action"><div class="spread"><span class="h">${["①", "②", "③", "④", "⑤", "⑥"][i]} ${esc(p.title)}</span>${badge(c.util <= 1 ? "ok" : "critical", `사용률 ${pct(c.util, 0)}`)}</div>
+    return `<div class="action"><div class="spread"><span class="h">${["①", "②", "③", "④", "⑤", "⑥"][i]} ${esc(p.title)}</span>${badge(c.util <= 1 ? "ok" : "critical", `사용률 ${pct(P.util0, 0)} → ${pct(c.util, 0)}`)}</div>
       <div class="note" style="margin:4px 0 8px">${esc(p.why)}</div>
       <div class="grid2 g-md-3">
         <div class="kpi"><div class="l">${E.limLabel(S.set.limit)}</div><div class="v">${won(c.varL)}</div><div class="s">현재 ${won(P.var0)}</div></div>
