@@ -196,7 +196,7 @@ function computePort() {
   const H = S.holdings.filter(h => h.t && h.shares > 0), cash = +S.cash || 0;
   const W = E.weights(S.ctx, H, cash);
   if (!Object.keys(W.w).length) { S.port = { W, empty: true }; return Promise.resolve(); }
-  const set = { lam: S.market.defaults.ewma_lambda, limit: S.set.limit, targets: S.set.targets, erp: S.set.erp, dupTh: S.market.defaults.signals.dup_corr || 0.9 };
+  const set = { lam: S.market.defaults.ewma_lambda, limit: S.set.limit, targets: S.set.targets, bounds: S.set.bounds || null, erp: S.set.erp, dupTh: S.market.defaults.signals.dup_corr || 0.9 };
   const alertSet = { limit: S.set.limit, targets: S.set.targets, ddWarn: S.set.ddWarn, moveTh: S.set.moveTh, dupTh: set.dupTh, rule: S.set.rule };
   S.port = { W, pending: true, set };
   busyOn("port", "보유내역 분석 중… 잠시만 기다려 주세요");
@@ -216,7 +216,9 @@ function computePort() {
     const jobs = [job("recommend", { w: r.W.w, nav: r.W.nav, diag: r.diag, set }).then(x => {
       if (seq !== S.portSeq) return; S.rec = x; refreshPort(); if (S.view === "home") renderHome(); if (S.view === "fr") renderFr();
     })];
-    if (r.diag.util > 1 || r.diag.util < 0.7) jobs.push(calcPlans(S.planTarget || 0.9, true, seq));
+    // 한도를 넘었으면 줄이는 안, 목표 사용률보다 여유가 있으면 늘리는 안을 자동으로 계산
+    const tgU = S.planTarget || 0.9;
+    if (r.diag.util > 1 || r.diag.util < tgU * 0.97) jobs.push(calcPlans(tgU, true, seq));
     return Promise.all(jobs).catch(e => { if (seq !== S.portSeq) return; if (!S.rec) S.rec = { actions: [], error: String(e.message || e) }; refreshPort(); if (S.view === "home") renderHome(); }).finally(() => busyOff("rec"));
   }).catch(e => {
     if (seq !== S.portSeq) return;
@@ -229,7 +231,7 @@ function calcPlans(target, quiet, seq) {
   const P = S.port; if (!portReady()) return Promise.resolve();
   S.planTarget = target; seq = seq || S.portSeq;
   if (!quiet) busyOn("plans", "재편안 계산 중… 잠시만 기다려 주세요");
-  return job("plans", { H: curHoldings(), cash: +S.cash || 0, limAmt: P.diag.limAmt, opt: { target, targets: S.set.targets, erp: P.set.erp || S.market.defaults.erp, h: E.limHC(S.set.limit).h, c: E.limHC(S.set.limit).c } })
+  return job("plans", { H: curHoldings(), cash: +S.cash || 0, limAmt: P.diag.limAmt, opt: { target, targets: S.set.targets, bounds: S.set.bounds || null, erp: P.set.erp || S.market.defaults.erp, h: E.limHC(S.set.limit).h, c: E.limHC(S.set.limit).c } })
     .then(r => { if (seq !== S.portSeq) return; S.plans = r; refreshPort(); })
     .finally(() => busyOff("plans"));
 }
@@ -344,12 +346,12 @@ function renderPort() {
       ${d.qStart ? `<p class="note">분기초(${d.qStart.date}) 평가액 ${won(d.qStart.value)}${d.qStart.fixed ? "(이번 분기 고정)" : ""}의 ${pct(S.set.limit.pct, 0)} · 분기 들어 ${sg(d.qStart.chg)} · 위험자산 비중 ${pct(d.riskyK, 0)}${d.k0 ? ` (기본 ${pct(d.k0, 0)})` : ""}</p>` : ""}
       <div class="meter" role="img" aria-label="사용률 ${pct(util, 0)}"><i style="width:${Math.min(util, 1.5) / 1.5 * 100}%;background:var(${ucol})"></i><b style="left:${100 / 1.5}%"></b></div>
       <div class="note">사용률 ${pct(util, 0)} (부트스트랩 기준) · 세로선 = 한도 100%</div>${limActHtml(d)}</div>`;
-    html += plansCard(d) + simCard();
+    html += boundsCard() + plansCard(d) + simCard();
     // 추천
     html += `<div class="card"><h2>지금 할 일</h2><p class="desc">예측이 잘 되는 위험(상관·변동성·중복 노출)을 근거로 고른 변경안. 기대수익 가정 세 가지 모두에서 샤프가 좋아지면 '견고한 개선'.</p><div id="recBox">${S.rec && S.rec.error ? `<p class="desc">추천 계산 실패: ${esc(S.rec.error)}</p>` : S.rec ? recHtml() : spin("편입·편출 효과 계산 중…")}</div></div>`;
     // 스트레스
-    html += `<div class="card"><h2>과거 위기 재현 (현재 비중)</h2>${table(["위기", "내 포트<div class=\"note\">원화 / 달러</div>", "S&P500<div class=\"note\">원화 / 달러</div>"], d.S.map(s => [`${esc(s.name)}<div class="note">${esc(s.type)}</div>`, `${s.krw === null ? "–" : sg(s.krw)}<div class="note">${sg(s.usd)}</div>`, `${sg(s.spy_krw)}<div class="note">${sg(s.spy)}</div>`]))}
-      <p class="note">위 줄 원화, 아래 줄 달러. 같은 통화끼리 비교하세요. 원화와 달러의 차이 = 환율 효과(위기 때 원화 약세로 달러 자산의 원화 손실이 줄어드는 경우가 많음). 상장 전 구간은 비슷한 ETF로 이어 붙였습니다.</p></div>`;
+    html += `<div class="card"><h2>과거 위기 재현 (현재 비중)</h2>${table(["위기", "내 포트", "S&P500"], d.S.map(s => [`${esc(s.name)}<div class="note">${esc(s.type)}</div>`, `${s.krw === null ? "–" : `<b>${sg(s.krw)}</b><div>${wonS(s.krw * W.nav)}</div>`}<div class="note">달러 ${sg(s.usd)}</div>`, `${sg(s.spy_krw)}<div class="note">달러 ${sg(s.spy)}</div>`]))}
+      <p class="note">위부터 원화 수익률, 예상 손익 금액(지금 평가액 ${won(W.nav)} × 원화 수익률), 달러 기준 수익률. 같은 통화끼리 비교하세요. 원화와 달러의 차이 = 환율 효과(위기 때 원화 약세로 달러 자산의 원화 손실이 줄어드는 경우가 많음). 상장 전 구간은 비슷한 ETF로 이어 붙였습니다.</p></div>`;
     const rule = S.set.rule, tg = S.set.targets || null, RC = P.RC || [], RB = P.RB, SLV = rule.basis === "sleeve", kNow = E.riskyShare(W.w);
     const st = r => r.act === "now" ? badge("warning", `지금 ${r.side} ${won(r.amt)}`) : r.act === "later" ? badge("info", `${RB.next} 점검 때 ${r.side}`) + `<div class="note">지금 기준 ${won(r.amt)}</div>` : r.out ? '<span class="pill">범위 밖 · 정기 점검 때</span>' : '<span class="pill">유지</span>';
     html += `<div class="card"><h2>리밸런싱 ${ib("리밸런싱")}</h2>
@@ -365,7 +367,7 @@ function renderPort() {
   el.innerHTML = html;
   bindHoldings();
   const vs = $("#varSeg"); if (vs) vs.querySelectorAll("button").forEach(b => b.onclick = () => { S.set.varMethod = b.dataset.k; saveSet(); renderPort(); });
-  bindRec(); bindPlans(); bindSim();
+  bindRec(); bindBounds(); bindPlans(); bindSim();
 }
 function limActHtml(d) {
   const a = d.limAct;
@@ -380,6 +382,63 @@ function limActHtml(d) {
   return `<div class="action" style="margin-top:10px"><div class="spread"><span class="h">${a.kind === "cut" ? "한도 초과 — 위험자산 줄이기" : "여유 생김 — 위험자산 다시 늘리기"}</span>${badge(a.kind === "cut" ? "critical" : "info", `${pct(a.k, 0)} → ${pct(a.kNew, 0)}`)}</div>
     ${table(["종목", "매매", "주수"], rows)}<p class="note">${a.kind === "cut" ? "모든 위험자산을 같은 비율로 줄여 위험자산 안의 비율은 그대로 둡니다." : "목표비중의 위험자산 안 비율대로 삽니다(기본 비중까지). 다른 방법은 아래 '한도 맞춤 재편안'에 있습니다."} 주수는 오늘 가격 기준 근사입니다.</p></div>`;
 }
+// ───────── 종목별 최소·최대 주수 (재편안 제약) ─────────
+function boundsRows() {
+  if (S.bdDraft) return S.bdDraft;
+  const B = S.set.bounds || {}, tks = [...new Set([...curHoldings().map(h => h.t), "SGOV", ...Object.keys(B)])];
+  return tks.map(t => ({ t, min: B[t] && Number.isFinite(B[t].min) ? B[t].min : "", max: B[t] && Number.isFinite(B[t].max) ? B[t].max : "" }));
+}
+function boundsSummary() {
+  const B = S.set.bounds || {}, parts = [];
+  for (const t in B) { const b = B[t]; if (Number.isFinite(b.min) && Number.isFinite(b.max)) parts.push(`${t} ${b.min}~${b.max}주`); else if (Number.isFinite(b.min)) parts.push(`${t} ≥ ${b.min}주`); else if (Number.isFinite(b.max)) parts.push(`${t} ≤ ${b.max}주`); }
+  return parts;
+}
+function boundsCard() {
+  const R = boundsRows(), held = {}; curHoldings().forEach(h => { held[h.t] = (held[h.t] || 0) + h.shares; });
+  const sum = boundsSummary();
+  return `<div class="card"><details id="bdBox" ${S.bdOpen ? "open" : ""}><summary><b>재편안 제약: 종목별 최소·최대 주수</b> <span class="note">${sum.length ? esc(sum.join(", ")) : "설정 안 함"}</span></summary>
+    <p class="desc" style="margin-top:8px">재편안·한도 축소 안내·'지금 할 일'이 이 범위를 지킵니다. 빈칸은 제약 없음. 예: 꼭 지킬 종목은 최소에 지금 주수, 사지 않을 종목은 최대에 0. 보유하지 않은 종목(예: TLT 최대 0)도 추가할 수 있습니다.</p>
+    <div class="tbl"><table><thead><tr><th style="text-align:left">종목</th><th>지금</th><th>최소(주)</th><th>최대(주)</th><th></th></tr></thead><tbody>
+    ${R.map((r, i) => `<tr><td style="text-align:left">${held[r.t] !== undefined || r.t === "SGOV" ? `<b>${esc(r.t)}</b>` : `<input list="tk2b" data-bt="${i}" value="${esc(r.t)}" placeholder="티커" style="width:80px" autocapitalize="characters">`}</td>
+      <td>${held[r.t] || 0}</td><td><input type="number" inputmode="decimal" min="0" data-bmin="${i}" value="${r.min}" placeholder="없음" style="width:60px"></td>
+      <td><input type="number" inputmode="decimal" min="0" data-bmax="${i}" value="${r.max}" placeholder="없음" style="width:60px"></td>
+      <td>${held[r.t] === undefined && r.t !== "SGOV" ? `<button class="btn" data-bdel="${i}" aria-label="삭제">✕</button>` : ""}</td></tr>`).join("")}
+    </tbody></table></div>
+    <datalist id="tk2b">${E.tickers(S.ctx).sort().map(t => `<option value="${t}">`).join("")}</datalist>
+    <div class="row" style="margin-top:8px"><button class="btn" id="bdAdd">+ 종목 추가</button><button class="btn" id="bdClr">모두 지우기</button><button class="btn primary" id="bdSave">저장하고 다시 계산</button></div>
+    <p class="note" id="bdMsg">${S.bdMsg || ""}</p></details></div>`;
+}
+function bindBounds() {
+  const box = $("#bdBox"); if (!box) return;
+  box.addEventListener("toggle", () => { S.bdOpen = box.open; });
+  const read = () => {
+    const R = boundsRows().map(r => Object.assign({}, r));
+    document.querySelectorAll("[data-bt]").forEach(el => { R[+el.dataset.bt].t = el.value.trim().toUpperCase().replace(".", "-"); });
+    document.querySelectorAll("[data-bmin]").forEach(el => { R[+el.dataset.bmin].min = el.value; });
+    document.querySelectorAll("[data-bmax]").forEach(el => { R[+el.dataset.bmax].max = el.value; });
+    S.bdDraft = R; return R;
+  };
+  box.querySelectorAll("input").forEach(el => el.addEventListener("input", read));
+  $("#bdAdd").onclick = () => { read(); S.bdDraft.push({ t: "", min: "", max: "" }); S.bdOpen = true; renderPort(); };
+  box.querySelectorAll("[data-bdel]").forEach(b => b.onclick = () => { read(); S.bdDraft.splice(+b.dataset.bdel, 1); S.bdOpen = true; renderPort(); });
+  $("#bdClr").onclick = () => { S.bdDraft = boundsRows().map(r => ({ t: r.t, min: "", max: "" })); S.bdOpen = true; renderPort(); };
+  $("#bdSave").onclick = () => {
+    const R = read(), B = {}, bad = [];
+    for (const r of R) {
+      if (!r.t) continue;
+      const mn = r.min === "" ? null : parseFloat(r.min), mx = r.max === "" ? null : parseFloat(r.max);
+      if ((mn !== null && !(mn >= 0)) || (mx !== null && !(mx >= 0))) { bad.push(`${r.t}: 0 이상 숫자`); continue; }
+      if (mn !== null && mx !== null && mn > mx) { bad.push(`${r.t}: 최소가 최대보다 큼`); continue; }
+      if (mn === null && mx === null) continue;
+      if (!S.market.last_px[r.t]) { bad.push(`${r.t}: 시세 없음`); continue; }
+      B[r.t] = { min: mn, max: mx };
+    }
+    if (bad.length) { $("#bdMsg").textContent = "저장 안 됨 — " + bad.join(" · "); return; }
+    S.set.bounds = Object.keys(B).length ? B : null; S.bdDraft = null; S.bdOpen = true; saveSet();
+    S.bdMsg = "저장됨 · 재편안에 반영합니다"; computePort(); renderPort(); autoSync("#bdMsg", "저장됨 · 재편안에 반영합니다");
+  };
+}
+
 // ───────── 한도 맞춤 재편안 ─────────
 const wonS = x => (x > 0 ? "+" : x < 0 ? "−" : "") + won(Math.abs(x));
 function tradeTable(T) {
@@ -388,17 +447,19 @@ function tradeTable(T) {
 function plansCard(d) {
   const tg = S.planTarget || 0.9, P = S.plans;
   let body;
-  if (!P) body = d.util > 1 || d.util < 0.7 ? spin("재편안 계산 중…") : `<p class="desc">지금 사용률 ${pct(d.util, 0)} — 줄일 필요도, 크게 늘릴 여유도 없는 구간이라 자동으로 계산하지 않았습니다. 목표 사용률을 고르고 '계산'을 누르면 그 수준까지 <b>줄이는 안 또는 늘리는 안</b>을 보여줍니다.</p>`;
+  if (!P) body = d.util > 1 || d.util < tg * 0.97 ? spin(d.util > 1 ? "줄이는 재편안 계산 중…" : "늘릴 여유가 있어 늘리는 재편안 계산 중…") : `<p class="desc">지금 사용률 ${pct(d.util, 0)} — 한도 안이고 목표(${pct(tg, 0)})와도 거의 같아 자동으로 계산하지 않았습니다. 다른 목표 사용률을 고르고 '계산'을 누르면 그 수준까지 <b>줄이는 안 또는 늘리는 안</b>을 보여줍니다.</p>`;
   else if (P.dir === "none") body = `<p class="desc">현재 사용률 ${pct(P.util0, 0)}로 목표(${pct(tg, 0)})와 거의 같습니다. 다른 목표 사용률을 골라 보세요.</p>`;
   else if (!P.plans.length) body = P.dir === "add" ? `<p class="desc">사용률 ${pct(P.util0, 0)}로 목표(${pct(tg, 0)})보다 여유가 있지만, 늘리는 데 쓸 SGOV·원화 현금이 없습니다.</p>` : `<p class="desc">위험자산을 모두 줄여도 목표에 닿지 않습니다. 목표 사용률을 높이거나 한도를 다시 정해 주세요.</p>`;
   else body = (P.dir === "add" ? `<div class="banner" style="background:var(--okbg,#e8f5ee)">여유 있음 — 사용률 ${pct(P.util0, 0)} → 목표 ${pct(tg, 0)}까지 <b>위험자산을 늘리는 안</b>입니다(SGOV·원화 현금에서 꺼내 매수, 빚 없이).${P.k0 ? ` 목표비중 기준 기본 위험자산 비중은 ${pct(P.k0, 0)}입니다.` : ""}</div>` : "") + (P.floorSGOV && !P.floorSGOV.reachable ? `<div class="banner">SGOV로 옮기는 것만으로는 목표에 닿지 않습니다. SGOV도 원화로 보면 환율 위험이 있어서, 위험자산을 ${pct(P.floorSGOV.k, 0)}까지 줄였을 때 ${E.limLabel(S.set.limit)} ${won(P.floorSGOV.var)}가 최저입니다. 원화 현금·다른 ETF 안을 보세요.</div>` : "") + P.plans.map((p, i) => {
     const c = p.check;
-    return `<div class="action"><div class="spread"><span class="h">${["①", "②", "③", "④", "⑤", "⑥"][i]} ${esc(p.title)}</span>${badge(c.util <= 1 ? "ok" : "critical", `사용률 ${pct(P.util0, 0)} → ${pct(c.util, 0)}`)}</div>
+    return `<div class="action"><div class="spread"><span class="h">${["①", "②", "③", "④", "⑤", "⑥"][i]} ${esc(p.title)}</span>${badge(c.util <= 1 && !p.best ? "ok" : c.util <= 1 ? "warning" : "critical", `사용률 ${pct(P.util0, 0)} → ${pct(c.util, 0)}`)}</div>
       <div class="note" style="margin:4px 0 8px">${esc(p.why)}</div>
+      ${p.best ? `<div class="banner">최소·최대 주수 때문에 목표 사용률(${pct(tg, 0)})까지는 못 맞춥니다 — 가능한 최선입니다.</div>` : ""}
+      ${p.viol && p.viol.length ? `<div class="banner">정수 주로 맞추다 제약을 벗어났습니다: ${esc(p.viol.join(", "))}</div>` : ""}
       <div class="grid2 g-md-3">
         <div class="kpi"><div class="l">${E.limLabel(S.set.limit)}</div><div class="v">${won(c.varL)}</div><div class="s">현재 ${won(P.var0)}</div></div>
         <div class="kpi"><div class="l">균형 기대수익 ${ib("균형 기대수익")}</div><div class="v">${pct(p.er1, 1)}</div><div class="s">현재 ${pct(p.er0, 1)} · 연</div></div>
-        <div class="kpi"><div class="l">최악의 위기</div><div class="v">${c.worst ? sg(c.worst.krw) : "–"}</div><div class="s">${c.worst ? esc(c.worst.name) : ""}</div></div>
+        <div class="kpi"><div class="l">최악의 위기</div><div class="v">${c.worst ? sg(c.worst.krw) : "–"}</div><div class="s">${c.worst ? `${wonS(c.worst.krw * c.nav)} · ${esc(c.worst.name)}` : ""}</div></div>
       </div>
       <details style="margin-top:8px"><summary>매매 ${p.trades.length}건 보기 (주수)</summary>${tradeTable(p.trades)}<p class="note">매매 후 남는 원화 현금 약 ${won(p.cash)}. 오늘 가격·환율 기준, 정수 주로 맞춘 뒤 VaR를 다시 계산한 값입니다.</p></details>
       <div class="row" style="margin-top:8px"><button class="btn" data-plan="${i}">시뮬레이터에 넣기</button></div></div>`;
@@ -461,12 +522,13 @@ function simResHtml() {
     ...[[252, 0.95, "1년 95% VaR", "var1y"], [63, 0.95, "3개월 95% VaR", "var3m"], [21, 0.95, "1개월 95% VaR", "var1m"], [10, 0.95, "10일 95% VaR", "var10d"], [1, 0.99, "1일 99% VaR", "var1d99"]]
       .filter(([h, c]) => !(h === E.limHC(S.set.limit).h && c === E.limHC(S.set.limit).c)).map(([, , lab, k]) => row(lab, a[k], b[k], won, "low")),
     row("연변동성(최근)", a.volNow, b.volNow, x => pct(x, 1), "low"), row("연변동성(3년)", a.vol3y, b.vol3y, x => pct(x, 1), "low"),
-    row("최악의 위기", a.worst && a.worst.krw, b.worst && b.worst.krw, x => pct(x, 1)), row("균형 기대수익(연)", a.er, b.er, x => pct(x, 1)),
+    row("최악의 위기", a.worst && a.worst.krw, b.worst && b.worst.krw, x => pct(x, 1)), row("최악의 위기 손익", a.worst && a.worst.krw * a.nav, b.worst && b.worst.krw * b.nav, x => wonS(x)), row("균형 기대수익(연)", a.er, b.er, x => pct(x, 1)),
   ];
   return `${badge(b.util <= 1 ? "ok" : "critical", b.util <= 1 ? "한도 안" : "한도 초과")}
     ${table(["", "지금", "바꾼 뒤", ""], rows)}
     <p class="note">VaR 계산 창: 두 포트 공통 구간의 최근 ${b.years}년 · 한도 ${won(S.port.diag.limAmt)} 고정 · 최악의 위기: ${b.worst ? esc(b.worst.name) : "–"}</p>
     ${unknown.length ? `<div class="banner">${unknown.join(", ")}: 시세 데이터가 없어 계산에서 뺐습니다.</div>` : ""}
+    ${(() => { const v = E.boundsViol(S.simRes.H1, S.set.bounds); return v.length ? `<div class="banner">설정한 최소·최대 주수를 벗어납니다: ${esc(v.join(", "))}</div>` : ""; })()}
     ${deposit > 0 ? `<div class="banner">매수가 매도보다 ${won(deposit)} 많습니다 — 추가 입금으로 가정했습니다.</div>` : `<p class="note">매매 후 원화 현금 ${won(cash1)}</p>`}
     ${C.trades.length ? `<h3>매매 목록</h3>${tradeTable(C.trades)}` : ""}
     <div class="row" style="margin-top:8px"><button class="btn" id="simApply">이 구성으로 보유내역 바꾸기</button><span class="note" id="simMsg"></span></div>`;
@@ -501,7 +563,7 @@ function recHtml() {
       <div class="grid2 g-md-3">
         <div class="kpi"><div class="l">연변동성 (최근 / 3년)</div><div class="v">${sgp(a.dVolEwma)}</div><div class="s">${pct(a.volEwma0)}→${pct(a.volEwma1)} / ${pct(a.vol3y0)}→${pct(a.vol3y1)}</div></div>
         <div class="kpi"><div class="l">${E.limLabel(S.set.limit)}</div><div class="v">${won(a.varL1)}</div><div class="s">현재 ${won(a.varL0)} · ${a.varYears}년 표본</div></div>
-        <div class="kpi"><div class="l">최악의 위기 (${a.nStress}개 비교)</div><div class="v">${sg(a.worst1)}</div><div class="s">현재 ${sg(a.worst0)}</div></div>
+        <div class="kpi"><div class="l">최악의 위기 (${a.nStress}개 비교)</div><div class="v">${sg(a.worst1)}</div><div class="s">${wonS(a.worst1 * S.port.W.nav)} · 현재 ${sg(a.worst0)}(${wonS(a.worst0 * S.port.W.nav)})</div></div>
       </div>
       <div class="note" style="margin-top:6px">샤프 변화: ${ok}</div>
       <div class="row" style="margin-top:8px"><button class="btn" data-fr="${i}">투자선에서 보기</button></div></div>`;
@@ -821,7 +883,7 @@ async function runNow() {
   } catch (e) { msg.textContent = String(e.message || e); }
 }
 async function syncUp(pw) {
-  const box = await E.encrypt({ holdings: S.holdings, cash: S.cash, settings: { limit: S.set.limit, targets: S.set.targets, ddWarn: S.set.ddWarn, moveTh: S.set.moveTh, erp: S.set.erp, rfKRW: S.set.rfKRW, rule: S.set.rule }, saved: new Date().toISOString() }, pw);
+  const box = await E.encrypt({ holdings: S.holdings, cash: S.cash, settings: { limit: S.set.limit, targets: S.set.targets, ddWarn: S.set.ddWarn, moveTh: S.set.moveTh, erp: S.set.erp, rfKRW: S.set.rfKRW, rule: S.set.rule, bounds: S.set.bounds || null }, saved: new Date().toISOString() }, pw);
   let sha; try { sha = (await gh("/contents/portfolio.enc.json")).sha; } catch (e) { }
   const content = btoa(unescape(encodeURIComponent(JSON.stringify(box))));
   await gh("/contents/portfolio.enc.json", { method: "PUT", body: JSON.stringify({ message: "update encrypted portfolio", content, sha }) });
